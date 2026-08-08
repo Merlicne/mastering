@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Linux Networking — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .netns-row {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 10px 0;
+  }
+  .netns-box {
+    flex: 1;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+    min-height: 170px;
+    background: var(--bg-elevated);
+  }
+  .netns-box.ghost {
+    opacity: 0.4;
+    border-style: dashed;
+  }
+  .netns-title {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    font-weight: 700;
+    margin-bottom: 10px;
+  }
+  .iface-chip {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 7px;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    margin-bottom: 6px;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.83rem;
+  }
+  .iface-chip .ip { color: var(--text-muted); }
+  .state-badge {
+    font-size: 0.68rem;
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+  }
+  .state-badge.up { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+  .state-badge.down { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-muted); }
+
+  .cable-col {
+    flex: 0 0 100px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-align: center;
+    padding: 0 6px;
+  }
+  .cable-line {
+    width: 100%;
+    height: 2px;
+    background: var(--accent-2);
+  }
+  .cable-col.empty .cable-line { background: transparent; }
+  .ping-pulse {
+    font-size: 0.75rem;
+    color: var(--accent-2);
+    font-weight: 700;
+  }
+
+  .cmd-line {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.9rem;
+  }
+  .cmd-line .prompt { color: var(--accent-2); margin-right: 6px; }
+
+  .step-text { min-height: 3.2em; margin-top: 14px; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 5 of 5</span>
+    <h1>Linux Networking</h1>
+    <p><span class="term" data-tip="A Linux kernel feature that gives a process its own private, isolated copy of the network stack -- its own interfaces, IP addresses, routing table, and firewall rules -- separate from every other namespace on the same machine.">Network namespaces</span> give each container or sandbox its own private network stack. Step through creating one, connecting it to the host with a <span class="term" data-tip="A pair of virtual network interfaces that always come together, wired to each other like a virtual patch cable -- anything sent in one end always comes out the other.">veth pair</span>, and bringing it up — and see exactly which <code>ip</code> command does each part.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Why this matters</h3>
+    <p style="margin-top: 0;">This is the actual mechanism containers are built on. When you run <code>docker run</code>, Docker (via <span class="term" data-tip="Runtime Spec-compliant container runtime, e.g. runc, invoked by higher-level tools like Docker/containerd/Podman -- it's the piece that actually calls the Linux kernel syscalls to set up namespaces.">runc</span>) does almost exactly what this page walks through: create a namespace, create a veth pair, move one end in, assign addresses, and bring interfaces up. Namespaces handle isolation; a separate kernel feature called <span class="term" data-tip="Control groups -- the other half of container isolation, limiting how much CPU, memory, and I/O a group of processes can use. Namespaces isolate what a process can see; cgroups limit what it can consume.">cgroups</span> handles resource limits. Together they're most of what "container" means at the kernel level — no VM required.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <div class="netns-row" id="netnsRow"></div>
+
+    <div class="panel">
+      <div class="log" id="cmdLog"><div style="color: var(--text-muted);">Press "Next" to run the first command.</div></div>
+    </div>
+
+    <div class="panel step-text" id="stepText"></div>
+
+    <div class="controls">
+      <button class="btn" id="resetBtn">⟲ Reset</button>
+      <button class="btn" id="prevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="nextBtn">Next ▶</button>
+      <span class="step-counter" id="stepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;"><code>ip</code> command reference</h3>
+    <table>
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">ip netns add &lt;name&gt;</td><td>Creates a new, isolated network namespace.</td></tr>
+        <tr><td class="mono">ip netns list</td><td>Lists all named namespaces on the system.</td></tr>
+        <tr><td class="mono">ip netns exec &lt;name&gt; &lt;cmd&gt;</td><td>Runs any command inside that namespace's network context — the rest of the system (filesystem, processes) is unaffected.</td></tr>
+        <tr><td class="mono">ip link add &lt;a&gt; type veth peer name &lt;b&gt;</td><td>Creates a connected veth pair, interfaces <code>a</code> and <code>b</code>.</td></tr>
+        <tr><td class="mono">ip link set &lt;iface&gt; netns &lt;name&gt;</td><td>Moves an interface into a namespace — it disappears from the current namespace's <code>ip link</code> output entirely.</td></tr>
+        <tr><td class="mono">ip addr add &lt;ip&gt;/&lt;prefix&gt; dev &lt;iface&gt;</td><td>Assigns an IP address (see the <a href="subnetting.html">subnetting page</a> for what the prefix means) to an interface.</td></tr>
+        <tr><td class="mono">ip link set &lt;iface&gt; up</td><td>Activates an interface — until this runs, it can't send or receive anything.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>A fresh namespace's loopback is DOWN.</strong> Unlike the host's <code>lo</code>, which is up from boot, every new namespace starts with <code>lo</code> down — step 9 above exists for a reason, and forgetting it is one of the most common namespace debugging headaches.</li>
+      <li style="margin-bottom: 6px;"><strong>A veth pair alone doesn't reach the internet.</strong> This demo connects ns1 to the host, but for ns1 to reach the outside world you'd also need <span class="term" data-tip="A kernel setting (net.ipv4.ip_forward) that lets a Linux host route traffic between two of its own interfaces instead of only accepting traffic addressed to itself.">IP forwarding</span> enabled on the host and usually a <span class="term" data-tip="Network Address Translation rule (commonly via iptables/nftables MASQUERADE) that rewrites ns1's private source address to the host's public address for outbound traffic -- the same technique your home router uses.">NAT/MASQUERADE</span> rule, similar to what a home router does for your private devices.</li>
+      <li style="margin-bottom: 6px;"><strong>Namespaces can outlive every process inside them.</strong> Bind-mounting a namespace's file under <code>/var/run/netns/</code> keeps it alive (and referenceable by name) even with no running process — that's what makes <code>ip netns add</code> persistent instead of disappearing the instant you stop using it.</li>
+      <li><strong>A veth pair only connects two points.</strong> To connect three or more namespaces together (not just to the host), you'd plug multiple veth ends into a <span class="term" data-tip="A virtual Layer 2 switch inside the kernel (created with ip link add type bridge). Multiple veth ends can be attached to one bridge, letting many namespaces talk to each other the way a physical switch connects many cables.">Linux bridge</span> instead of connecting them directly to each other.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="dns-resolution.html">← Previous: DNS Resolution</a>
+    <a href="l3-routing.html">Next: L3 IP Routing &amp; ICMP →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var steps = [
+    {
+      cmd: null,
+      text: "Initial state: only the host's root network namespace exists, with its loopback interface and a real network interface.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }]],
+      ns1: null
+    },
+    {
+      cmd: "ip netns add ns1",
+      text: "Create a new, isolated network namespace called ns1. It gets its own loopback interface, routing table, and firewall rules — completely separate from the host.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }]],
+      ns1: [["lo", { state: "down" }]]
+    },
+    {
+      cmd: "ip link add veth0 type veth peer name veth1",
+      text: "Create a veth pair — think of it as a virtual Ethernet cable with two ends, veth0 and veth1. Both ends currently sit in the host namespace.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "down" }], ["veth1", { state: "down" }]],
+      ns1: [["lo", { state: "down" }]],
+      cable: "none"
+    },
+    {
+      cmd: "ip link set veth1 netns ns1",
+      text: "Move one end of the cable (veth1) into ns1. The veth pair now bridges the host namespace and ns1 — whatever goes in one end comes out the other.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "down" }]],
+      ns1: [["lo", { state: "down" }], ["veth1", { state: "down" }]],
+      cable: "split"
+    },
+    {
+      cmd: "ip addr add 10.0.0.1/24 dev veth0",
+      text: "Give the host's end of the cable an IP address.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "down", ip: "10.0.0.1/24" }]],
+      ns1: [["lo", { state: "down" }], ["veth1", { state: "down" }]],
+      cable: "split"
+    },
+    {
+      cmd: "ip netns exec ns1 ip addr add 10.0.0.2/24 dev veth1",
+      text: "Give ns1's end of the cable an IP address on the same subnet.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "down", ip: "10.0.0.1/24" }]],
+      ns1: [["lo", { state: "down" }], ["veth1", { state: "down", ip: "10.0.0.2/24" }]],
+      cable: "split"
+    },
+    {
+      cmd: "ip link set veth0 up",
+      text: "Bring the host's end of the cable up.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "up", ip: "10.0.0.1/24" }]],
+      ns1: [["lo", { state: "down" }], ["veth1", { state: "down", ip: "10.0.0.2/24" }]],
+      cable: "split"
+    },
+    {
+      cmd: "ip netns exec ns1 ip link set veth1 up",
+      text: "Bring ns1's end of the cable up too.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "up", ip: "10.0.0.1/24" }]],
+      ns1: [["lo", { state: "down" }], ["veth1", { state: "up", ip: "10.0.0.2/24" }]],
+      cable: "split"
+    },
+    {
+      cmd: "ip netns exec ns1 ip link set lo up",
+      text: "New namespaces start with their loopback interface DOWN — easy to forget. Bring it up so ns1 can talk to itself and use localhost.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "up", ip: "10.0.0.1/24" }]],
+      ns1: [["lo", { state: "up" }], ["veth1", { state: "up", ip: "10.0.0.2/24" }]],
+      cable: "split"
+    },
+    {
+      cmd: "ip netns exec ns1 ping -c1 10.0.0.1",
+      text: "With both ends addressed and up, ns1 can now reach the host across the veth pair.",
+      host: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "192.168.1.50/24" }], ["veth0", { state: "up", ip: "10.0.0.1/24" }]],
+      ns1: [["lo", { state: "up" }], ["veth1", { state: "up", ip: "10.0.0.2/24" }]],
+      cable: "ping"
+    }
+  ];
+
+  var netnsRow = document.getElementById("netnsRow");
+  var cmdLog = document.getElementById("cmdLog");
+  var stepText = document.getElementById("stepText");
+  var stepCounter = document.getElementById("stepCounter");
+  var prevBtn = document.getElementById("prevBtn");
+  var nextBtn = document.getElementById("nextBtn");
+  var resetBtn = document.getElementById("resetBtn");
+
+  var stepIndex = 0;
+
+  function renderIfaces(list) {
+    if (!list) return "";
+    return list.map(function (entry) {
+      var name = entry[0], props = entry[1];
+      return '<div class="iface-chip"><span>' + name + (props.ip ? ' <span class="ip">' + props.ip + "</span>" : "") + '</span><span class="state-badge ' + props.state + '">' + props.state.toUpperCase() + "</span></div>";
+    }).join("");
+  }
+
+  function renderCable(cable) {
+    if (cable === "split") {
+      return '<div class="cable-col"><div class="cable-line"></div><span>veth0 ⟷ veth1</span></div>';
+    }
+    if (cable === "ping") {
+      return '<div class="cable-col"><div class="cable-line"></div><span class="ping-pulse">◀ ping reply ◀</span><span>veth0 ⟷ veth1</span></div>';
+    }
+    return '<div class="cable-col empty"><div class="cable-line"></div><span>&nbsp;</span></div>';
+  }
+
+  function render() {
+    var step = steps[stepIndex];
+
+    var hostBox = '<div class="netns-box"><div class="netns-title">Host (root netns)</div>' + renderIfaces(step.host) + "</div>";
+    var ns1Box = step.ns1
+      ? '<div class="netns-box"><div class="netns-title">ns1</div>' + renderIfaces(step.ns1) + "</div>"
+      : '<div class="netns-box ghost"><div class="netns-title">ns1 (not created yet)</div></div>';
+
+    netnsRow.innerHTML = hostBox + renderCable(step.cable) + ns1Box;
+
+    stepText.textContent = step.text;
+
+    cmdLog.innerHTML = "";
+    var any = false;
+    for (var i = 0; i <= stepIndex; i++) {
+      if (!steps[i].cmd) continue;
+      any = true;
+      var line = document.createElement("div");
+      line.className = "cmd-line";
+      line.innerHTML = '<span class="prompt">$</span>' + steps[i].cmd;
+      cmdLog.appendChild(line);
+    }
+    if (!any) {
+      cmdLog.innerHTML = '<div style="color: var(--text-muted);">No commands run yet — this is the starting state.</div>';
+    }
+    cmdLog.scrollTop = cmdLog.scrollHeight;
+
+    stepCounter.textContent = "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex === 0;
+    nextBtn.disabled = stepIndex === steps.length - 1;
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > 0) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", function () { stepIndex = 0; render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L3: IP Routing &amp; ICMP — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .rt-field { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .rt-field label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .rt-field input { width: 200px; }
+
+  tr.rt-match { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  tr.rt-winner { background: color-mix(in srgb, var(--accent) 18%, transparent); font-weight: 600; }
+  tr.rt-no-match { opacity: 0.45; }
+
+  .rt-verdict { margin-top: 14px; }
+
+  /* Hop journey */
+  .hops-row { display: flex; align-items: center; margin: 20px 0 6px; }
+  .hop-box {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    font-size: 0.85rem;
+    font-weight: 600;
+    text-align: center;
+    transition: background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+  }
+  .hop-box.passed { border-color: var(--accent-2); }
+  .hop-box.current { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .hop-box.current.discarded { background: var(--danger); border-color: var(--danger); color: #fff; }
+  .hop-box.current.reached { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .hop-connector { flex: 1; height: 2px; background: var(--border); margin: 0 4px; transition: background 0.2s ease; }
+  .hop-connector.traveled { background: var(--accent-2); }
+  .ttl-badge { text-align: center; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+  .return-note {
+    text-align: center;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.82rem;
+    color: var(--danger);
+    min-height: 1.4em;
+    margin-top: 4px;
+  }
+  .return-note.ok { color: var(--ok); }
+
+  /* NAT demo */
+  .nat-row { display: flex; align-items: center; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
+  .nat-box { flex: 1; min-width: 160px; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--bg-elevated); font-size: 0.85rem; }
+  .nat-box .title { font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+  .nat-arrow { flex: 0 0 auto; font-size: 1.3rem; color: var(--text-muted); }
+
+  .frag-grid { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 14px; }
+  .frag-grid .field { display: flex; flex-direction: column; gap: 6px; }
+  .frag-grid .field label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .frag-grid input { width: 160px; }
+
+  .step-text { min-height: 3em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Deep Dive · Layer 3</span>
+    <h1>IP Routing &amp; ICMP</h1>
+    <p>Layer 3 has one job: get a packet from a source that may be many networks away to the right destination. It does that with <span class="term" data-tip="The process of selecting a path across one or more networks for a packet to travel, one hop at a time, based on the packet's destination address.">routing</span> — and it uses <span class="term" data-tip="Internet Control Message Protocol -- the error-reporting and diagnostic protocol that rides on top of IP. ping and traceroute are both built entirely on ICMP.">ICMP</span> to report problems and let tools like <code>ping</code> and <code>traceroute</code> work at all.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">How a router picks a next hop</h3>
+    <p style="margin-top: 0;">A router doesn't know the full path to every destination — it only knows, for each packet, which neighboring router to hand it to next: the <span class="term" data-tip="The next router a packet should be forwarded to in order to get closer to its destination. A router only ever needs to know this one neighbor, not the whole remaining path.">next hop</span>. It decides using a routing table, matching the packet's destination IP against every entry and picking the <span class="term" data-tip="When more than one routing table entry matches a destination address, the router always prefers the entry with the longest (most specific) subnet mask -- not the first one listed, not the shortest one. A /24 match always beats a /8 match for the same address.">longest prefix match</span> — the most specific route that still matches.</p>
+
+    <div class="rt-field">
+      <label for="destInput">Destination IP</label>
+      <input type="text" id="destInput" value="10.1.2.55" autocomplete="off" spellcheck="false">
+    </div>
+
+    <table>
+      <thead><tr><th>Destination</th><th>Next hop</th><th>Interface</th><th>Prefix length</th></tr></thead>
+      <tbody id="rtBody"></tbody>
+    </table>
+
+    <div class="panel rt-verdict" id="rtVerdict"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Watch a packet cross the network (how traceroute works)</h3>
+    <p style="margin-top: 0;">Every IP packet carries a <span class="term" data-tip="Time To Live -- an 8-bit counter in the IP header, decremented by 1 at every router hop. When it hits 0, the router discards the packet instead of forwarding it forever -- this is what stops routing loops from circulating packets endlessly.">TTL</span> that every router decrements by 1. If TTL hits 0, the router drops the packet and sends back an ICMP <em>Time Exceeded</em> message identifying itself. Traceroute abuses this on purpose: it sends packets with TTL=1, then 2, then 3, deliberately "killing" the packet at each successive hop to map the whole path one router at a time.</p>
+
+    <div class="ttl-badge" id="ttlBadge"></div>
+    <div class="hops-row" id="hopsRow"></div>
+    <div class="return-note" id="returnNote"></div>
+
+    <div class="panel step-text" id="hopStepText" style="margin-top: 14px;"></div>
+
+    <div class="controls">
+      <button class="btn" id="hopResetBtn">⟲ Reset</button>
+      <button class="btn" id="hopPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="hopNextBtn">Next ▶</button>
+      <span class="step-counter" id="hopStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">NAT: translating addresses at the border</h3>
+    <p style="margin-top: 0;"><span class="term" data-tip="Network Address Translation -- rewrites the source (or destination) IP address and port of packets as they cross a router, most commonly to let many private hosts share one public IP address.">NAT</span> exists because there aren't enough IPv4 addresses for every device to have a public one. A home router gives every device a private address, then rewrites outbound packets to use its single public address — tracking the substitution in a table so replies can be translated back.</p>
+
+    <div class="nat-row">
+      <div class="nat-box">
+        <div class="title">Private host</div>
+        10.0.0.5:51000
+      </div>
+      <div class="nat-arrow">→</div>
+      <div class="nat-box">
+        <div class="title">NAT router rewrites to</div>
+        203.0.113.9:40001
+      </div>
+      <div class="nat-arrow">→</div>
+      <div class="nat-box">
+        <div class="title">Destination sees</div>
+        Request from 203.0.113.9:40001
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Internal address</th><th>Translated (public) address</th><th>Destination</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">10.0.0.5:51000</td><td class="mono">203.0.113.9:40001</td><td class="mono">93.184.216.34:443</td></tr>
+      </tbody>
+    </table>
+    <p class="note" style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">When the reply arrives addressed to 203.0.113.9:40001, the router looks up this exact table entry, rewrites the destination back to 10.0.0.5:51000, and forwards it — the private host never sees the public address at all.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Fragmentation: when a packet is too big</h3>
+    <p style="margin-top: 0;">If a packet is larger than a link's <span class="term" data-tip="Maximum Transmission Unit -- the largest frame payload a link allows, e.g. 1500 bytes on typical Ethernet.">MTU</span>, a router has to split it into smaller fragments before forwarding. Each fragment gets its own IP header, a copy of the identification field so the destination knows which fragments belong together, and an offset (in 8-byte units) so they can be reassembled in the right order.</p>
+
+    <div class="frag-grid">
+      <div class="field">
+        <label for="pktSizeInput">Original packet size (bytes)</label>
+        <input type="number" id="pktSizeInput" value="4000" min="1">
+      </div>
+      <div class="field">
+        <label for="mtuInput">Link MTU (bytes)</label>
+        <input type="number" id="mtuInput" value="1500" min="28">
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Fragment</th><th>Offset (bytes)</th><th>Offset field value (8-byte units)</th><th>Payload size</th><th>More fragments?</th></tr></thead>
+      <tbody id="fragBody"></tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common ICMP message types</h3>
+    <table>
+      <thead><tr><th>Type</th><th>Name</th><th>Used for</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">8</td><td>Echo Request</td><td>What <code>ping</code> sends.</td></tr>
+        <tr><td class="mono">0</td><td>Echo Reply</td><td>What <code>ping</code> is waiting for.</td></tr>
+        <tr><td class="mono">11</td><td>Time Exceeded</td><td>TTL hit 0 — exactly what traceroute exploits.</td></tr>
+        <tr><td class="mono">3</td><td>Destination Unreachable</td><td>Host, network, or port couldn't be reached.</td></tr>
+        <tr><td class="mono">5</td><td>Redirect</td><td>A router telling a host a better next hop exists for this destination.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>ICMP is often blocked.</strong> Many firewalls drop it entirely, so traceroute frequently shows <code>* * *</code> for some hops even though the path is working fine — silence doesn't mean the network is broken.</li>
+      <li style="margin-bottom: 6px;"><strong>The routing table's order doesn't matter.</strong> Unlike firewall rules, which are usually first-match, routing is always longest-prefix-match — the most specific route wins no matter where it sits in the table.</li>
+      <li style="margin-bottom: 6px;"><strong>Traceroute timing can be misleading.</strong> Generating an ICMP Time Exceeded message is often deprioritized by a router's CPU, so an intermediate hop can look artificially slow compared to the actual end-to-end latency.</li>
+      <li><strong>NAT breaks unsolicited inbound connections.</strong> A private host behind NAT can't be reached from outside without an explicit port-forwarding rule, because there's no existing table entry for the router to reverse-translate against.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="linux-networking.html">← Previous: Linux Networking</a>
+    <a href="firewalls.html">Next: Firewalls &amp; Rules →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  function parseIp(str) {
+    var parts = str.trim().split(".");
+    if (parts.length !== 4) return null;
+    var octets = [];
+    for (var i = 0; i < 4; i++) {
+      if (!/^\d{1,3}$/.test(parts[i])) return null;
+      var n = parseInt(parts[i], 10);
+      if (n < 0 || n > 255) return null;
+      octets.push(n);
+    }
+    return octets;
+  }
+  function octetsToInt(o) { return ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0; }
+  function maskFromPrefix(prefix) { return prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0; }
+
+  // ---------------- Routing table lookup ----------------
+  var routes = [
+    { network: "0.0.0.0", prefix: 0, nextHop: "203.0.113.1", iface: "eth0", desc: "Default route — used only when nothing more specific matches." },
+    { network: "10.0.0.0", prefix: 8, nextHop: "10.0.0.1", iface: "eth1", desc: "Broad internal route covering the whole 10.0.0.0/8 block." },
+    { network: "10.1.0.0", prefix: 16, nextHop: "10.1.2.1", iface: "eth2", desc: "More specific route to just the 10.1.0.0/16 subnet." },
+    { network: "10.1.2.0", prefix: 24, nextHop: "directly connected", iface: "eth3", desc: "This router has an interface directly on this subnet." },
+    { network: "192.168.1.0", prefix: 24, nextHop: "192.168.1.254", iface: "eth4", desc: "Route to a partner office's subnet over a VPN." }
+  ];
+
+  var destInput = document.getElementById("destInput");
+  var rtBody = document.getElementById("rtBody");
+  var rtVerdict = document.getElementById("rtVerdict");
+
+  function updateRouting() {
+    var octets = parseIp(destInput.value);
+    rtBody.innerHTML = "";
+    if (!octets) {
+      rtVerdict.textContent = "Enter a valid destination IPv4 address.";
+      return;
+    }
+    var destInt = octetsToInt(octets);
+    var winner = null;
+
+    routes.forEach(function (r) {
+      var netOctets = parseIp(r.network);
+      var netInt = octetsToInt(netOctets);
+      var maskInt = maskFromPrefix(r.prefix);
+      var matches = (destInt & maskInt) >>> 0 === (netInt & maskInt) >>> 0;
+      if (matches && (!winner || r.prefix > winner.prefix)) winner = r;
+      var tr = document.createElement("tr");
+      tr.className = matches ? "rt-match" : "rt-no-match";
+      tr.innerHTML =
+        "<td class=\"mono\">" + r.network + "/" + r.prefix + "</td>" +
+        "<td class=\"mono\">" + r.nextHop + "</td>" +
+        "<td class=\"mono\">" + r.iface + "</td>" +
+        "<td class=\"mono\">/" + r.prefix + "</td>";
+      tr._route = r;
+      rtBody.appendChild(tr);
+    });
+
+    Array.prototype.forEach.call(rtBody.children, function (tr) {
+      if (winner && tr._route === winner) tr.className = "rt-winner";
+    });
+
+    if (winner) {
+      rtVerdict.innerHTML = "<strong>Winner: " + winner.network + "/" + winner.prefix + "</strong> → next hop " + winner.nextHop + " via " + winner.iface + ". " + winner.desc;
+    } else {
+      rtVerdict.textContent = "No route matches this destination (not even a default route) — the packet would be dropped with a Destination Unreachable.";
+    }
+  }
+
+  destInput.addEventListener("input", updateRouting);
+  updateRouting();
+
+  // ---------------- Hop-by-hop traceroute journey ----------------
+  var hopNames = ["Source", "R1", "R2", "R3", "Destination"];
+  var hopSteps = [
+    { ttl: 1, reachHop: 1, discarded: true,
+      text: "Packet leaves the source with TTL=1. R1 receives it, decrements TTL to 0, discards it, and sends back an ICMP Time Exceeded message — revealing R1's address to the source." },
+    { ttl: 2, reachHop: 2, discarded: true,
+      text: "Packet leaves with TTL=2. R1 decrements it to 1 and forwards it; R2 decrements it to 0, discards it, and sends back ICMP Time Exceeded — revealing R2's address." },
+    { ttl: 3, reachHop: 3, discarded: true,
+      text: "Packet leaves with TTL=3. It survives R1 and R2, then dies at R3 — revealing R3's address." },
+    { ttl: 4, reachHop: 4, discarded: false,
+      text: "Packet leaves with TTL=4. It survives all three routers and finally reaches the destination, which replies directly. The traceroute is complete — every hop along the path has now been revealed, one TTL at a time." }
+  ];
+
+  var hopsRow = document.getElementById("hopsRow");
+  var ttlBadge = document.getElementById("ttlBadge");
+  var returnNote = document.getElementById("returnNote");
+  var hopStepText = document.getElementById("hopStepText");
+  var hopStepCounter = document.getElementById("hopStepCounter");
+  var hopPrevBtn = document.getElementById("hopPrevBtn");
+  var hopNextBtn = document.getElementById("hopNextBtn");
+  var hopResetBtn = document.getElementById("hopResetBtn");
+  var hopStepIndex = 0;
+
+  function renderHops() {
+    var step = hopSteps[hopStepIndex];
+    hopsRow.innerHTML = "";
+    for (var i = 0; i < hopNames.length; i++) {
+      if (i > 0) {
+        var connector = document.createElement("div");
+        connector.className = "hop-connector" + (i <= step.reachHop ? " traveled" : "");
+        hopsRow.appendChild(connector);
+      }
+      var box = document.createElement("div");
+      var cls = "hop-box";
+      if (i < step.reachHop) cls += " passed";
+      if (i === step.reachHop) cls += step.discarded ? " current discarded" : " current reached";
+      box.className = cls;
+      box.textContent = hopNames[i];
+      hopsRow.appendChild(box);
+    }
+
+    ttlBadge.textContent = "Packet sent with TTL = " + step.ttl;
+    hopStepText.textContent = step.text;
+
+    if (step.discarded) {
+      returnNote.className = "return-note";
+      returnNote.textContent = "◀── ICMP Time Exceeded from " + hopNames[step.reachHop] + " ──";
+    } else {
+      returnNote.className = "return-note ok";
+      returnNote.textContent = "── reply from " + hopNames[step.reachHop] + " ──▶ traceroute complete";
+    }
+
+    hopStepCounter.textContent = "Step " + (hopStepIndex + 1) + " / " + hopSteps.length;
+    hopPrevBtn.disabled = hopStepIndex === 0;
+    hopNextBtn.disabled = hopStepIndex === hopSteps.length - 1;
+  }
+
+  hopPrevBtn.addEventListener("click", function () { if (hopStepIndex > 0) { hopStepIndex--; renderHops(); } });
+  hopNextBtn.addEventListener("click", function () { if (hopStepIndex < hopSteps.length - 1) { hopStepIndex++; renderHops(); } });
+  hopResetBtn.addEventListener("click", function () { hopStepIndex = 0; renderHops(); });
+  renderHops();
+
+  // ---------------- Fragmentation calculator ----------------
+  var pktSizeInput = document.getElementById("pktSizeInput");
+  var mtuInput = document.getElementById("mtuInput");
+  var fragBody = document.getElementById("fragBody");
+  var IP_HEADER_SIZE = 20;
+
+  function updateFragmentation() {
+    var pktSize = parseInt(pktSizeInput.value, 10);
+    var mtu = parseInt(mtuInput.value, 10);
+    fragBody.innerHTML = "";
+    if (!pktSize || !mtu || mtu <= IP_HEADER_SIZE) return;
+
+    if (pktSize <= mtu - IP_HEADER_SIZE) {
+      fragBody.innerHTML = "<tr><td colspan=\"5\">No fragmentation needed — the packet already fits within this MTU.</td></tr>";
+      return;
+    }
+
+    var maxPayload = Math.floor((mtu - IP_HEADER_SIZE) / 8) * 8;
+    var numFragments = Math.ceil(pktSize / maxPayload);
+    var offset = 0;
+    for (var i = 0; i < numFragments; i++) {
+      var remaining = pktSize - offset;
+      var size = Math.min(maxPayload, remaining);
+      var more = i < numFragments - 1;
+      var tr = document.createElement("tr");
+      tr.innerHTML =
+        "<td>" + (i + 1) + " / " + numFragments + "</td>" +
+        "<td class=\"mono\">" + offset + "</td>" +
+        "<td class=\"mono\">" + (offset / 8) + "</td>" +
+        "<td class=\"mono\">" + size + " bytes</td>" +
+        "<td>" + (more ? "Yes" : "No (last fragment)") + "</td>";
+      fragBody.appendChild(tr);
+      offset += size;
+    }
+  }
+
+  pktSizeInput.addEventListener("input", updateFragmentation);
+  mtuInput.addEventListener("input", updateFragmentation);
+  updateFragmentation();
+})();
+</script>
+</body>
+</html>

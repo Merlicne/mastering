@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TCP Handshake &amp; Packet Flow — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .actors {
+    display: flex;
+    justify-content: space-between;
+    font-weight: 700;
+    padding: 0 4px 6px;
+  }
+  .actor-state {
+    display: block;
+    font-weight: 500;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    margin-top: 2px;
+  }
+
+  .diagram {
+    display: flex;
+    flex-direction: column;
+    gap: 26px;
+    padding: 10px 4px 6px;
+    min-height: 60px;
+  }
+
+  .seq-row { position: relative; }
+  .seq-label {
+    text-align: center;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.8rem;
+    margin-bottom: 4px;
+  }
+  .seq-label .flagbadge {
+    font-weight: 700;
+    padding: 1px 7px;
+    border-radius: 999px;
+    color: #fff;
+    margin-right: 6px;
+  }
+  .flagbadge.syn { background: #2563eb; }
+  .flagbadge.ack { background: #6b7280; }
+  .flagbadge.data { background: #0d9488; }
+  .flagbadge.fin { background: #dc2626; }
+
+  .seq-arrow {
+    position: relative;
+    height: 2px;
+    background: var(--border);
+    margin: 0 6px;
+  }
+  .seq-arrow.cs { background: var(--accent); }
+  .seq-arrow.sc { background: var(--accent-2); }
+  .seq-arrow.cs::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -4px;
+    border-style: solid;
+    border-width: 5px 0 5px 9px;
+    border-color: transparent transparent transparent var(--accent);
+  }
+  .seq-arrow.sc::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: -4px;
+    border-style: solid;
+    border-width: 5px 9px 5px 0;
+    border-color: transparent var(--accent-2) transparent transparent;
+  }
+
+  .step-text { min-height: 3.2em; }
+
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+
+  .phase-note {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+    color: var(--accent-2);
+    margin: 22px 0 4px;
+  }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 3 of 5</span>
+    <h1>TCP Handshake &amp; Packet Flow</h1>
+    <p>Step through the <span class="term" data-tip="Called a three-way handshake because it takes exactly three segments -- SYN, SYN-ACK, ACK -- for both sides to agree they can talk and to synchronize starting sequence numbers.">three-way handshake</span> that opens a <span class="term" data-tip="TCP is connection-oriented: both sides explicitly establish a connection before exchanging data and explicitly tear it down afterward, unlike connectionless protocols like UDP.">TCP</span> connection, a short data exchange, and the four-way teardown that closes it. Sequence numbers below are simplified for clarity.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Why three steps to say hello?</h3>
+    <p style="margin-top: 0;">Two segments wouldn't be enough. TCP needs both sides to prove they can send <em>and</em> receive, and both sides need to pick and confirm a random <span class="term" data-tip="A 32-bit counter, one per direction, that lets the receiver put arriving bytes back in order and detect any that are missing or duplicated. It starts at a randomized value rather than 0 or 1, mainly to avoid collisions with a recent previous connection using the same port pair.">initial sequence number</span> so both ends can track exactly which bytes have been sent and received.</p>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>SYN</strong> proves the client can send and picks the client's initial sequence number.</li>
+      <li style="margin-bottom: 6px;"><strong>SYN-ACK</strong> proves the server can send <em>and</em> receive (it acknowledges the client's SYN) and picks the server's own initial sequence number.</li>
+      <li><strong>ACK</strong> proves the client can receive too, acknowledging the server's SYN. Only now do both sides know the round trip works in both directions.</li>
+    </ul>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <div class="actors">
+      <span>Client<span class="actor-state" id="clientState">CLOSED</span></span>
+      <span style="text-align:right;">Server<span class="actor-state" id="serverState">LISTEN</span></span>
+    </div>
+    <div class="diagram" id="diagram"></div>
+
+    <div class="panel step-text" id="stepText" style="margin-top: 14px;"></div>
+
+    <div class="controls">
+      <button class="btn" id="resetBtn">⟲ Reset</button>
+      <button class="btn" id="prevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="nextBtn">Next ▶</button>
+      <span class="step-counter" id="stepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Packet log</h3>
+    <div class="log" id="log"><div style="color: var(--text-muted);">Press "Next" to begin the handshake.</div></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">TCP flag glossary</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">SYN</td><td>"Synchronize" — requests a new connection and proposes an initial sequence number.</td></tr>
+        <tr><td class="mono">ACK</td><td>Acknowledges data or a control flag was received; carries the "ack" number, which is always <span class="term" data-tip="TCP acknowledgment numbers are cumulative: they mean 'I've received everything up to this byte' rather than acknowledging one specific segment. This is what lets a single lost ACK not stall the whole connection.">one more than the last byte received</span>.</td></tr>
+        <tr><td class="mono">PSH</td><td>"Push" — tells the receiving OS to hand the data straight to the application instead of buffering it, used for interactive data.</td></tr>
+        <tr><td class="mono">FIN</td><td>"Finish" — sender has no more data to send and wants to close its side of the connection.</td></tr>
+        <tr><td class="mono">RST</td><td>"Reset" — abruptly aborts a connection, e.g. when a segment arrives for a port nothing is listening on. Not part of a normal handshake or teardown.</td></tr>
+        <tr><td class="mono">URG</td><td>"Urgent" — marks part of the segment as needing out-of-band priority handling. Rarely used in modern applications.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>SYN flood attacks</strong> abuse step 1: an attacker sends many SYNs and never completes the handshake, hoping to exhaust the server's half-open connection table. Defenses include <span class="term" data-tip="A technique where the server doesn't allocate any state for a connection until it receives the final ACK -- it encodes what it needs into the SYN-ACK's sequence number instead, so a flood of SYNs that never gets ACKed costs the server almost nothing.">SYN cookies</span>.</li>
+      <li style="margin-bottom: 6px;"><strong>TIME_WAIT isn't a bug.</strong> The side that sends the last ACK of the teardown waits (often 30–120 seconds) before fully releasing the port, in case that ACK was lost and the FIN needs to be retransmitted. This is why a busy server can occasionally show many connections stuck in TIME_WAIT.</li>
+      <li style="margin-bottom: 6px;"><strong>RST isn't part of a graceful close.</strong> An RST tears down a connection immediately with no acknowledgment and no guarantee that in-flight data was delivered — it's what you see when a connection is refused, killed abruptly, or a firewall blocks it and spoofs a reset.</li>
+      <li><strong>Both sides can close independently.</strong> This page shows the client closing first, but either side can send the first FIN — the other side isn't required to close immediately after (it can keep sending data during the "half-closed" state before sending its own FIN).</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="subnetting.html">← Previous: Subnetting &amp; IP Addressing</a>
+    <a href="dns-resolution.html">Next: DNS Resolution →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var steps = [
+    { dir: "cs", flags: "SYN", cls: "syn", seq: 100, ack: null,
+      note: "Client picks an initial sequence number (100) and requests a new connection.",
+      clientState: "SYN_SENT", serverState: "LISTEN", phase: "Handshake" },
+    { dir: "sc", flags: "SYN, ACK", cls: "syn", seq: 300, ack: 101,
+      note: "Server acknowledges the client's SYN (ack = 101) and sends its own initial sequence number (300).",
+      clientState: "SYN_SENT", serverState: "SYN_RECEIVED", phase: "Handshake" },
+    { dir: "cs", flags: "ACK", cls: "ack", seq: 101, ack: 301,
+      note: "Client acknowledges the server's SYN (ack = 301). Three-way handshake complete — connection is ESTABLISHED.",
+      clientState: "ESTABLISHED", serverState: "ESTABLISHED", phase: "Handshake" },
+    { dir: "cs", flags: "PSH, ACK", cls: "data", seq: 101, ack: 301,
+      note: "Client sends application data — e.g. an HTTP GET request.",
+      clientState: "ESTABLISHED", serverState: "ESTABLISHED", phase: "Data transfer" },
+    { dir: "sc", flags: "ACK", cls: "ack", seq: 301, ack: 151,
+      note: "Server acknowledges receiving the client's data.",
+      clientState: "ESTABLISHED", serverState: "ESTABLISHED", phase: "Data transfer" },
+    { dir: "sc", flags: "PSH, ACK", cls: "data", seq: 301, ack: 151,
+      note: "Server sends response data back to the client.",
+      clientState: "ESTABLISHED", serverState: "ESTABLISHED", phase: "Data transfer" },
+    { dir: "cs", flags: "ACK", cls: "ack", seq: 151, ack: 601,
+      note: "Client acknowledges the server's response data.",
+      clientState: "ESTABLISHED", serverState: "ESTABLISHED", phase: "Data transfer" },
+    { dir: "cs", flags: "FIN, ACK", cls: "fin", seq: 151, ack: 601,
+      note: "Client has no more data to send and begins closing its side of the connection.",
+      clientState: "FIN_WAIT_1", serverState: "ESTABLISHED", phase: "Teardown" },
+    { dir: "sc", flags: "ACK", cls: "ack", seq: 601, ack: 152,
+      note: "Server acknowledges the client's FIN. Client's side is now half-closed; server can still send data.",
+      clientState: "FIN_WAIT_2", serverState: "CLOSE_WAIT", phase: "Teardown" },
+    { dir: "sc", flags: "FIN, ACK", cls: "fin", seq: 601, ack: 152,
+      note: "Server is also done sending and sends its own FIN.",
+      clientState: "TIME_WAIT", serverState: "LAST_ACK", phase: "Teardown" },
+    { dir: "cs", flags: "ACK", cls: "ack", seq: 152, ack: 602,
+      note: "Client acknowledges the server's FIN. Connection is fully closed on both sides (client waits briefly in TIME_WAIT).",
+      clientState: "TIME_WAIT", serverState: "CLOSED", phase: "Teardown" }
+  ];
+
+  var diagram = document.getElementById("diagram");
+  var stepText = document.getElementById("stepText");
+  var stepCounter = document.getElementById("stepCounter");
+  var clientState = document.getElementById("clientState");
+  var serverState = document.getElementById("serverState");
+  var log = document.getElementById("log");
+  var prevBtn = document.getElementById("prevBtn");
+  var nextBtn = document.getElementById("nextBtn");
+  var resetBtn = document.getElementById("resetBtn");
+
+  var stepIndex = -1;
+
+  function seqLabel(step) {
+    var parts = ['<span class="flagbadge ' + step.cls + '">' + step.flags + "</span>"];
+    parts.push("seq=" + step.seq);
+    if (step.ack !== null) parts.push("ack=" + step.ack);
+    return parts.join(" ");
+  }
+
+  function render() {
+    diagram.innerHTML = "";
+    var lastPhase = null;
+    for (var i = 0; i <= stepIndex; i++) {
+      var step = steps[i];
+      if (step.phase !== lastPhase) {
+        var phaseEl = document.createElement("div");
+        phaseEl.className = "phase-note";
+        phaseEl.textContent = step.phase;
+        diagram.appendChild(phaseEl);
+        lastPhase = step.phase;
+      }
+      var row = document.createElement("div");
+      row.className = "seq-row";
+      row.innerHTML =
+        '<div class="seq-label">' + seqLabel(step) + "</div>" +
+        '<div class="seq-arrow ' + step.dir + '"></div>';
+      diagram.appendChild(row);
+    }
+
+    if (stepIndex === -1) {
+      stepText.textContent = 'Press "Next" to begin the handshake.';
+      clientState.textContent = "CLOSED";
+      serverState.textContent = "LISTEN";
+      log.innerHTML = '<div style="color: var(--text-muted);">Press "Next" to begin the handshake.</div>';
+    } else {
+      var current = steps[stepIndex];
+      stepText.textContent = current.note;
+      clientState.textContent = current.clientState;
+      serverState.textContent = current.serverState;
+
+      log.innerHTML = "";
+      for (var j = 0; j <= stepIndex; j++) {
+        var s = steps[j];
+        var entry = document.createElement("div");
+        var arrow = s.dir === "cs" ? "Client → Server" : "Server → Client";
+        entry.innerHTML = "<strong>" + arrow + "</strong> [" + s.flags + "] seq=" + s.seq + (s.ack !== null ? " ack=" + s.ack : "") + " — " + s.note;
+        log.appendChild(entry);
+      }
+      log.scrollTop = log.scrollHeight;
+    }
+
+    stepCounter.textContent = stepIndex === -1 ? "Not started" : "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex <= -1;
+    nextBtn.disabled = stepIndex >= steps.length - 1;
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > -1) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", function () { stepIndex = -1; render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

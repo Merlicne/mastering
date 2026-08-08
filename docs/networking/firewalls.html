@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Firewalls &amp; Rules — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .rule-table-wrap { overflow-x: auto; }
+  tr.rule-row.matched { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+  .rule-controls { display: flex; gap: 4px; }
+  .rule-controls button {
+    width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.8rem; line-height: 1;
+  }
+  .rule-controls button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .rule-controls button:hover:not(:disabled) { border-color: var(--accent); }
+
+  .add-rule-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin: 16px 0; }
+  .add-rule-form .field { display: flex; flex-direction: column; gap: 6px; }
+  .add-rule-form .field label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .add-rule-form input, .add-rule-form select { width: 130px; }
+
+  .default-policy-row { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-size: 0.9rem; }
+
+  .packet-form { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; margin: 14px 0; }
+  .packet-form .field { display: flex; flex-direction: column; gap: 6px; }
+  .packet-form .field label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .packet-form input, .packet-form select { width: 150px; }
+  .packet-form .checkfield { flex-direction: row; align-items: center; gap: 8px; }
+
+  .trace-line { padding: 4px 0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem; }
+  .trace-line .no-match { color: var(--text-muted); }
+  .trace-line .yes-match { color: var(--ok); font-weight: 700; }
+
+  .verdict-box { margin-top: 12px; padding: 14px 16px; border-radius: 8px; font-weight: 700; text-align: center; }
+  .verdict-box.accept { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+  .verdict-box.drop { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
+  .verdict-box.reject { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Deep Dive · Security</span>
+    <h1>Firewalls &amp; Rules</h1>
+    <p>A firewall is a <span class="term" data-tip="Software or hardware that inspects packets against a set of rules and decides, for each one, whether to let it through.">packet filter</span> enforcing a policy: which traffic is allowed, and which isn't. Every host has one — this page covers how its rules actually get evaluated, and how you write and modify them yourself.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Stateful vs. stateless: why most rulesets are shorter than you'd expect</h3>
+    <p style="margin-top: 0;">A purely stateless filter examines every packet in isolation — you'd need one rule allowing your outbound request <em>and</em> a separate rule allowing the reply back in. Almost every real firewall instead uses <span class="term" data-tip="Netfilter's mechanism for remembering active connections, so the firewall can recognize a packet as part of a connection it already approved -- rather than re-evaluating every packet from scratch.">connection tracking (conntrack)</span>: once a connection is approved going out, its replies are automatically recognized and let back in, without a matching rule for them. That's why a working ruleset usually just needs one rule near the top: allow anything <span class="term" data-tip="Netfilter connection states. ESTABLISHED means the connection is already up and running; RELATED means the packet is logically tied to one that is, like an FTP data channel opened because of an already-approved control connection.">ESTABLISHED or RELATED</span>, then a handful of rules for genuinely new inbound connections.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">How a firewall evaluates a packet: order is everything</h3>
+    <p style="margin-top: 0;">Unlike <a href="l3-routing.html">routing</a>, where the most specific match always wins regardless of table order, firewall rules are evaluated top to bottom and the <strong>first</strong> match wins — full stop. A broad ACCEPT rule sitting above a specific DROP rule makes that DROP unreachable, no matter how precisely it's written. Edit the chain below and test packets against it:</p>
+
+    <div class="rule-table-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Match</th><th>Action</th><th></th></tr></thead>
+        <tbody id="ruleBody"></tbody>
+      </table>
+    </div>
+
+    <div class="default-policy-row">
+      <strong>Default policy (if nothing above matches):</strong>
+      <select id="defaultPolicySelect">
+        <option value="DROP" selected>DROP</option>
+        <option value="REJECT">REJECT</option>
+        <option value="ACCEPT">ACCEPT</option>
+      </select>
+    </div>
+
+    <h4 style="margin: 20px 0 6px;">Add a rule</h4>
+    <div class="add-rule-form">
+      <div class="field"><label for="ruleProto">Protocol</label>
+        <select id="ruleProto"><option value="any">any</option><option value="tcp" selected>tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select>
+      </div>
+      <div class="field"><label for="rulePort">Dest port (blank = any)</label><input type="number" id="rulePort" placeholder="any"></div>
+      <div class="field"><label for="ruleSource">Source (blank = any)</label><input type="text" id="ruleSource" placeholder="e.g. 203.0.113.0/24"></div>
+      <div class="field"><label for="ruleAction">Action</label>
+        <select id="ruleAction"><option value="ACCEPT" selected>ACCEPT</option><option value="DROP">DROP</option><option value="REJECT">REJECT</option></select>
+      </div>
+      <button class="btn btn-primary" id="addRuleBtn">+ Add to bottom</button>
+    </div>
+
+    <h4 style="margin: 24px 0 6px;">Test a packet</h4>
+    <div class="packet-form">
+      <div class="field"><label for="pktProto">Protocol</label>
+        <select id="pktProto"><option value="tcp" selected>tcp</option><option value="udp">udp</option><option value="icmp">icmp</option></select>
+      </div>
+      <div class="field"><label for="pktPort">Dest port</label><input type="number" id="pktPort" value="3306"></div>
+      <div class="field"><label for="pktSource">Source IP</label><input type="text" id="pktSource" value="198.51.100.5"></div>
+      <label class="field checkfield" style="flex-direction: row;"><input type="checkbox" id="pktEstablished"> Belongs to an already-established connection</label>
+    </div>
+
+    <div class="panel" id="traceOutput"></div>
+    <div class="verdict-box" id="verdictBox"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Writing rules: the actual tools</h3>
+    <table>
+      <thead><tr><th>Tool</th><th>What it is</th><th>Example: allow SSH, block one IP</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">iptables</td>
+          <td>The long-standing Linux packet filter frontend, still the most widely deployed.</td>
+          <td class="mono">iptables -A INPUT -p tcp --dport 22 -j ACCEPT<br>iptables -A INPUT -s 198.51.100.5 -j DROP</td>
+        </tr>
+        <tr>
+          <td class="mono">nftables</td>
+          <td><span class="term" data-tip="nftables is the designated successor to iptables/ip6tables/arptables/ebtables -- one syntax and one rule engine for all of them, with better performance for large rule sets.">iptables' designated successor</span>, one unified tool for IPv4, IPv6, and more.</td>
+          <td class="mono">nft add rule inet filter input tcp dport 22 accept<br>nft add rule inet filter input ip saddr 198.51.100.5 drop</td>
+        </tr>
+        <tr>
+          <td class="mono">ufw</td>
+          <td>"Uncomplicated Firewall" — a friendly frontend over iptables, standard on Ubuntu.</td>
+          <td class="mono">ufw allow 22/tcp<br>ufw deny from 198.51.100.5</td>
+        </tr>
+        <tr>
+          <td class="mono">firewalld</td>
+          <td><span class="term" data-tip="firewalld groups interfaces into named zones (e.g. public, internal, trusted), each with its own default policy and allowed services -- rules apply per zone, not as one flat global list.">Zone-based</span> management, standard on RHEL/Fedora/CentOS.</td>
+          <td class="mono">firewall-cmd --add-service=ssh --permanent<br>firewall-cmd --add-rich-rule='rule family="ipv4" source address="198.51.100.5" reject' --permanent</td>
+        </tr>
+        <tr>
+          <td class="mono">Cloud security groups</td>
+          <td>AWS/Azure/GCP's built-in filtering — stateful, but <strong>allow-only</strong>: there's no explicit DROP/REJECT rule, anything not listed is denied by default.</td>
+          <td class="mono">Add inbound rule: TCP 22 from 203.0.113.0/24 → allow<br>(there is no "deny 198.51.100.5" rule to add)</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">Useful housekeeping commands: <span class="mono">iptables -L INPUT --line-numbers</span> to see rule positions, <span class="mono">iptables -D INPUT 3</span> to delete rule 3, <span class="mono">iptables -I INPUT 1 ...</span> to insert at the very top (since, as above, position decides everything).</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>The classic self-lockout.</strong> Setting a default-DROP policy — or appending a broad DROP rule — on a remote box before your SSH-allow rule is confirmed in place will cut off your own access instantly, with no way back in except out-of-band/console access.</li>
+      <li style="margin-bottom: 6px;"><strong>Appending isn't the same as inserting.</strong> <span class="mono">-A</span> always adds to the bottom of the chain; if a broader rule above already matches everything, your new rule at the bottom is dead code. Fixing it usually means <span class="mono">-I</span> at a specific position, not another <span class="mono">-A</span>.</li>
+      <li style="margin-bottom: 6px;"><strong>DROP vs. REJECT is a real tradeoff.</strong> <span class="term" data-tip="Silently discards the packet with no response at all. The sender can't tell whether the port is filtered or simply not listening -- useful against casual scanning.">DROP</span> gives an attacker no information; <span class="term" data-tip="Actively responds -- typically a TCP RST or an ICMP Destination Unreachable -- telling the sender the connection was refused rather than leaving them to time out.">REJECT</span> is friendlier to legitimate clients that would otherwise hang waiting for a timeout, at the cost of confirming to a scanner that something is there.</li>
+      <li><strong>Cloud security groups aren't a full firewall.</strong> They're typically L3/L4 only and allow-only — anything you need beyond "which ports, from which sources" (deep packet inspection, L7 rules) still needs a host-level firewall or a dedicated appliance/WAF layered on top.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="l3-routing.html">← Previous: L3 IP Routing &amp; ICMP</a>
+    <a href="l4-tcp-udp.html">Next: L4 TCP vs UDP →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  function parseIp(str) {
+    var parts = (str || "").trim().split(".");
+    if (parts.length !== 4) return null;
+    var octets = [];
+    for (var i = 0; i < 4; i++) {
+      if (!/^\d{1,3}$/.test(parts[i])) return null;
+      var n = parseInt(parts[i], 10);
+      if (n < 0 || n > 255) return null;
+      octets.push(n);
+    }
+    return octets;
+  }
+  function octetsToInt(o) { return ((o[0] << 24) | (o[1] << 16) | (o[2] << 8) | o[3]) >>> 0; }
+  function maskFromPrefix(prefix) { return prefix === 0 ? 0 : (0xFFFFFFFF << (32 - prefix)) >>> 0; }
+
+  function ipInCidr(ip, cidr) {
+    if (!cidr) return true; // "any"
+    var parts = cidr.split("/");
+    var netOctets = parseIp(parts[0]);
+    var prefix = parts.length > 1 ? parseInt(parts[1], 10) : 32;
+    var ipOctets = parseIp(ip);
+    if (!netOctets || !ipOctets || isNaN(prefix)) return false;
+    var mask = maskFromPrefix(prefix);
+    return (octetsToInt(ipOctets) & mask) >>> 0 === (octetsToInt(netOctets) & mask) >>> 0;
+  }
+
+  var rules = [
+    { stateShortcut: true, proto: "state", port: null, source: null, action: "ACCEPT" },
+    { proto: "tcp", port: 22, source: null, action: "ACCEPT" },
+    { proto: "tcp", port: 80, source: null, action: "ACCEPT" },
+    { proto: "tcp", port: 443, source: null, action: "ACCEPT" },
+    { proto: "tcp", port: 3306, source: "203.0.113.0/24", action: "ACCEPT" }
+  ];
+  var defaultPolicy = "DROP";
+  var lastMatchedIndex = -1;
+
+  var ruleBody = document.getElementById("ruleBody");
+  var defaultPolicySelect = document.getElementById("defaultPolicySelect");
+  var addRuleBtn = document.getElementById("addRuleBtn");
+  var ruleProto = document.getElementById("ruleProto");
+  var rulePort = document.getElementById("rulePort");
+  var ruleSource = document.getElementById("ruleSource");
+  var ruleAction = document.getElementById("ruleAction");
+
+  var pktProto = document.getElementById("pktProto");
+  var pktPort = document.getElementById("pktPort");
+  var pktSource = document.getElementById("pktSource");
+  var pktEstablished = document.getElementById("pktEstablished");
+  var traceOutput = document.getElementById("traceOutput");
+  var verdictBox = document.getElementById("verdictBox");
+
+  function describeRule(rule) {
+    if (rule.stateShortcut) return "state ESTABLISHED,RELATED";
+    var parts = [rule.proto === "any" ? "any proto" : rule.proto];
+    parts.push(rule.port ? "dport " + rule.port : "any port");
+    if (rule.source) parts.push("src " + rule.source);
+    return parts.join(", ");
+  }
+
+  function renderRules() {
+    ruleBody.innerHTML = "";
+    rules.forEach(function (rule, i) {
+      var tr = document.createElement("tr");
+      tr.className = "rule-row" + (i === lastMatchedIndex ? " matched" : "");
+      var actionBadgeClass = rule.action === "ACCEPT" ? "badge-ok" : rule.action === "REJECT" ? "badge-danger" : "";
+      tr.innerHTML =
+        "<td>" + (i + 1) + "</td>" +
+        "<td class=\"mono\">" + describeRule(rule) + "</td>" +
+        "<td><span class=\"badge " + actionBadgeClass + "\">" + rule.action + "</span></td>" +
+        "<td><div class=\"rule-controls\">" +
+        "<button data-act=\"up\" data-i=\"" + i + "\" " + (i === 0 ? "disabled" : "") + ">▲</button>" +
+        "<button data-act=\"down\" data-i=\"" + i + "\" " + (i === rules.length - 1 ? "disabled" : "") + ">▼</button>" +
+        "<button data-act=\"del\" data-i=\"" + i + "\">✕</button>" +
+        "</div></td>";
+      ruleBody.appendChild(tr);
+    });
+  }
+
+  ruleBody.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    var i = parseInt(btn.dataset.i, 10);
+    var act = btn.dataset.act;
+    if (act === "up" && i > 0) {
+      var tmp = rules[i - 1]; rules[i - 1] = rules[i]; rules[i] = tmp;
+    } else if (act === "down" && i < rules.length - 1) {
+      var tmp2 = rules[i + 1]; rules[i + 1] = rules[i]; rules[i] = tmp2;
+    } else if (act === "del") {
+      rules.splice(i, 1);
+    }
+    evaluatePacket();
+  });
+
+  addRuleBtn.addEventListener("click", function () {
+    var port = rulePort.value.trim() === "" ? null : parseInt(rulePort.value, 10);
+    var source = ruleSource.value.trim() === "" ? null : ruleSource.value.trim();
+    rules.push({ proto: ruleProto.value, port: port, source: source, action: ruleAction.value });
+    rulePort.value = "";
+    ruleSource.value = "";
+    evaluatePacket();
+  });
+
+  defaultPolicySelect.addEventListener("change", function () {
+    defaultPolicy = defaultPolicySelect.value;
+    evaluatePacket();
+  });
+
+  function evaluatePacket() {
+    var packet = {
+      proto: pktProto.value,
+      port: parseInt(pktPort.value, 10),
+      source: pktSource.value.trim(),
+      established: pktEstablished.checked
+    };
+
+    var trace = [];
+    var verdict = null;
+    lastMatchedIndex = -1;
+
+    for (var i = 0; i < rules.length; i++) {
+      var rule = rules[i];
+      var matches;
+      if (rule.stateShortcut) {
+        matches = packet.established;
+      } else {
+        matches = (rule.proto === "any" || rule.proto === packet.proto) &&
+          (rule.port === null || rule.port === packet.port) &&
+          (rule.source === null || ipInCidr(packet.source, rule.source));
+      }
+      trace.push({ index: i, rule: rule, matches: matches });
+      if (matches) {
+        verdict = rule.action;
+        lastMatchedIndex = i;
+        break;
+      }
+    }
+
+    if (verdict === null) verdict = defaultPolicy;
+
+    traceOutput.innerHTML = "";
+    trace.forEach(function (t) {
+      var line = document.createElement("div");
+      line.className = "trace-line";
+      line.innerHTML = "Rule " + (t.index + 1) + " (" + describeRule(t.rule) + "): " +
+        (t.matches ? "<span class=\"yes-match\">MATCH → " + t.rule.action + "</span>" : "<span class=\"no-match\">no match</span>");
+      traceOutput.appendChild(line);
+    });
+    if (lastMatchedIndex === -1) {
+      var line = document.createElement("div");
+      line.className = "trace-line";
+      line.innerHTML = "No rule matched — falling back to default policy: <strong>" + defaultPolicy + "</strong>";
+      traceOutput.appendChild(line);
+    }
+
+    var verdictText = {
+      ACCEPT: "ACCEPTED — the packet is let through.",
+      DROP: "DROPPED — silently discarded, sender gets no response.",
+      REJECT: "REJECTED — sender gets an explicit refusal (RST / ICMP unreachable)."
+    }[verdict];
+    verdictBox.className = "verdict-box " + verdict.toLowerCase();
+    verdictBox.textContent = verdictText;
+
+    renderRules();
+  }
+
+  [pktProto, pktPort, pktSource, pktEstablished].forEach(function (el) {
+    el.addEventListener("input", evaluatePacket);
+    el.addEventListener("change", evaluatePacket);
+  });
+
+  renderRules();
+  evaluatePacket();
+})();
+</script>
+</body>
+</html>

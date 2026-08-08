@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Networking — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Interactive Mini-Course</span>
+    <h1>Networking Lab</h1>
+    <p>Eleven hands-on pages for building intuition about how networks actually move data — click, drag, and step through each concept instead of just reading about it. Start with the foundations, then go deep on individual protocol layers and see how containers and Kubernetes build their networking on top of them.</p>
+  </div>
+
+  <h2 style="margin: 0 0 4px;">Foundations</h2>
+  <p style="color: var(--text-muted); margin: 0;">The core concepts everything else on this site builds on.</p>
+
+  <div class="topic-grid">
+    <a class="topic-card" href="osi-layers.html">
+      <span class="icon">🧱</span>
+      <h3>OSI / TCP-IP Layers</h3>
+      <p>Click through each layer to see what it does, then watch a message get wrapped in headers on the way down and unwrapped on the way up.</p>
+    </a>
+
+    <a class="topic-card" href="subnetting.html">
+      <span class="icon">🧮</span>
+      <h3>Subnetting &amp; IP Addressing</h3>
+      <p>Type an IP and CIDR prefix and instantly see the network address, broadcast address, usable range, and binary mask.</p>
+    </a>
+
+    <a class="topic-card" href="tcp-handshake.html">
+      <span class="icon">🤝</span>
+      <h3>TCP Handshake &amp; Packet Flow</h3>
+      <p>Step through SYN, SYN-ACK, ACK, a data transfer, and the FIN teardown between a client and a server.</p>
+    </a>
+
+    <a class="topic-card" href="dns-resolution.html">
+      <span class="icon">🌐</span>
+      <h3>DNS Resolution</h3>
+      <p>Follow a domain lookup hop by hop: browser cache, resolver, root, TLD, and authoritative name server.</p>
+    </a>
+
+    <a class="topic-card" href="linux-networking.html">
+      <span class="icon">🐧</span>
+      <h3>Linux Networking</h3>
+      <p>See how network namespaces, interfaces, and veth pairs relate to the <code>ip</code> commands that create them.</p>
+    </a>
+  </div>
+
+  <h2 style="margin: 32px 0 4px;">Deep Dives &amp; Orchestration</h2>
+  <p style="color: var(--text-muted); margin: 0;">Go deeper on individual layers, then see how containers and Kubernetes build networking on top of them.</p>
+
+  <div class="topic-grid">
+    <a class="topic-card" href="l3-routing.html">
+      <span class="icon">🧭</span>
+      <h3>L3: IP Routing &amp; ICMP</h3>
+      <p>See how routers pick a next hop with longest-prefix match, and how traceroute uses ICMP to map the whole path.</p>
+    </a>
+
+    <a class="topic-card" href="firewalls.html">
+      <span class="icon">🛡️</span>
+      <h3>Firewalls &amp; Rules</h3>
+      <p>Test a hypothetical packet against a real rule chain and see why order — not specificity — decides the outcome.</p>
+    </a>
+
+    <a class="topic-card" href="l4-tcp-udp.html">
+      <span class="icon">⚖️</span>
+      <h3>L4: TCP vs UDP</h3>
+      <p>Compare reliable, ordered TCP against fast, connectionless UDP — and watch sliding windows and congestion control in action.</p>
+    </a>
+
+    <a class="topic-card" href="l7-protocols.html">
+      <span class="icon">📡</span>
+      <h3>L7: HTTP, WebSocket &amp; gRPC</h3>
+      <p>From HTTP/0.9 to HTTP/3, plus how WebSocket and gRPC solve problems plain request/response HTTP can't.</p>
+    </a>
+
+    <a class="topic-card" href="container-networking.html">
+      <span class="icon">📦</span>
+      <h3>Container Networking</h3>
+      <p>See exactly how Docker wires up a container's network using the same namespaces and veth pairs from the Linux Networking page.</p>
+    </a>
+
+    <a class="topic-card" href="kubernetes-networking.html">
+      <span class="icon">☸️</span>
+      <h3>Kubernetes Networking</h3>
+      <p>Follow a request from Ingress to Pod, and see how Services, kube-proxy, CNI, and NetworkPolicy all fit together.</p>
+    </a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+</body>
+</html>

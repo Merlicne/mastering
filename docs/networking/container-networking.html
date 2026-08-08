@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Container Networking — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .netns-row { display: flex; align-items: stretch; gap: 0; margin: 10px 0; }
+  .netns-box { flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 14px; min-height: 170px; background: var(--bg-elevated); }
+  .netns-box.ghost { opacity: 0.4; border-style: dashed; }
+  .netns-title { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 700; margin-bottom: 10px; }
+  .iface-chip {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 10px; border-radius: 7px; background: var(--code-bg); border: 1px solid var(--code-border);
+    margin-bottom: 6px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.83rem;
+  }
+  .iface-chip .ip { color: var(--text-muted); }
+  .state-badge { font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 999px; }
+  .state-badge.up { background: color-mix(in srgb, var(--ok) 20%, transparent); color: var(--ok); }
+  .state-badge.down { background: color-mix(in srgb, var(--text-muted) 20%, transparent); color: var(--text-muted); }
+  .cable-col {
+    flex: 0 0 90px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; color: var(--text-muted); font-size: 0.72rem; text-align: center; padding: 0 6px;
+  }
+  .cable-line { width: 100%; height: 2px; background: var(--accent-2); }
+  .cable-col.empty .cable-line { background: transparent; }
+
+  .cmd-line { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.9rem; }
+  .cmd-line .prompt { color: var(--accent-2); margin-right: 6px; }
+  .step-text { min-height: 3.2em; margin-top: 14px; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+
+  .nat-row { display: flex; align-items: center; gap: 14px; margin: 16px 0; flex-wrap: wrap; }
+  .nat-box { flex: 1; min-width: 160px; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; background: var(--bg-elevated); font-size: 0.85rem; }
+  .nat-box .title { font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+  .nat-arrow { flex: 0 0 auto; font-size: 1.3rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Deep Dive · Containers</span>
+    <h1>Container Networking</h1>
+    <p>Docker doesn't invent new networking primitives. It automates the exact <a href="linux-networking.html">network namespace and veth pair</a> mechanism from the Linux Networking page, then adds its own bridge and NAT rules on top so containers get an IP, reach the internet, and can optionally be reached from outside.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">The bridge network: what <code>docker run</code> actually does</h3>
+    <p style="margin-top: 0;">When the Docker daemon starts, it creates a Linux bridge called <span class="term" data-tip="A virtual Layer 2 switch inside the kernel. Every container on the same bridge network can reach every other container on it directly, the way devices plugged into a physical switch can reach each other.">docker0</span> with its own private subnet. Every container gets a veth pair whose host end plugs into that bridge — instead of dangling loose the way the manual example on the Linux Networking page did.</p>
+
+    <div class="netns-row" id="netnsRow"></div>
+
+    <div class="panel">
+      <div class="log" id="cmdLog"><div style="color: var(--text-muted);">Press "Next" to run the first command.</div></div>
+    </div>
+
+    <div class="panel step-text" id="stepText"></div>
+
+    <div class="controls">
+      <button class="btn" id="resetBtn">⟲ Reset</button>
+      <button class="btn" id="prevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="nextBtn">Next ▶</button>
+      <span class="step-counter" id="stepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Port publishing: <code>-p 8080:80</code></h3>
+    <p style="margin-top: 0;">A container's bridge IP (like 172.17.0.2) isn't reachable from outside the host — it's private, same as any other <a href="l3-routing.html">NAT</a>-hidden address. Publishing a port adds an <code>iptables</code> <span class="term" data-tip="Destination Network Address Translation -- rewrites a packet's destination address/port as it arrives, before routing. This is exactly how docker -p forwards a host port into a container.">DNAT</span> rule that rewrites the destination for you.</p>
+
+    <div class="nat-row">
+      <div class="nat-box"><div class="title">Request arrives at</div>host:8080</div>
+      <div class="nat-arrow">→</div>
+      <div class="nat-box"><div class="title">iptables DNAT rewrites to</div>172.17.0.2:80</div>
+      <div class="nat-arrow">→</div>
+      <div class="nat-box"><div class="title">Delivered to</div>nginx inside the container</div>
+    </div>
+
+    <div class="log">
+      <div>$ docker run -d -p 8080:80 nginx</div>
+      <div># Docker adds a rule roughly equivalent to:</div>
+      <div>$ iptables -t nat -A DOCKER -p tcp --dport 8080 -j DNAT --to-destination 172.17.0.2:80</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Container DNS: resolving containers by name</h3>
+    <p style="margin-top: 0;">On a <span class="term" data-tip="A network created explicitly with docker network create, as opposed to the automatic default bridge network every install starts with.">user-defined network</span>, Docker runs an embedded DNS server at <code>127.0.0.11</code> inside every container on it, so <code>web</code> can reach <code>db</code> just by resolving the name <code>db</code> — no hardcoded IPs, even though container IPs can change on restart.</p>
+    <table>
+      <thead><tr><th>Network type</th><th>Containers resolve each other by name?</th></tr></thead>
+      <tbody>
+        <tr><td>Default bridge (<code>bridge</code>)</td><td>No — this is a common surprise. Only IP-to-IP works, for legacy compatibility reasons.</td></tr>
+        <tr><td>User-defined bridge (<code>docker network create mynet</code>)</td><td>Yes — automatic, via the embedded 127.0.0.11 resolver.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Network driver comparison</h3>
+    <table>
+      <thead><tr><th>Driver</th><th>What it does</th><th>Typical use</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">bridge</td><td>Private network namespace + veth pair to a bridge (the default, and everything demonstrated above)</td><td>Most single-host container workloads</td></tr>
+        <tr><td class="mono">host</td><td>No namespace isolation at all — the container shares the host's network stack directly</td><td>Maximum performance when isolation isn't the goal</td></tr>
+        <tr><td class="mono">none</td><td>Only a loopback interface, no external connectivity</td><td>Fully isolated batch jobs</td></tr>
+        <tr><td class="mono">overlay</td><td>A virtual network spanning multiple hosts, tunneling container traffic between them (typically via <span class="term" data-tip="Virtual Extensible LAN -- a tunneling protocol that encapsulates Layer 2 Ethernet frames inside Layer 3/4 UDP packets, letting a virtual network span physically separate hosts.">VXLAN</span>)</td><td>Multi-host Swarm/cluster deployments</td></tr>
+        <tr><td class="mono">macvlan</td><td>Gives a container its own MAC address, making it look like a physical device directly on the LAN</td><td>Legacy apps that expect to own a real network identity</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>The default bridge network has no name-based DNS.</strong> If containers need to find each other by name, put them on a user-defined network — don't rely on the default one Docker creates automatically.</li>
+      <li style="margin-bottom: 6px;"><strong><code>host</code> networking skips isolation, not just performance overhead.</strong> A container using it binds directly to the host's ports — two containers both wanting port 80 will conflict, exactly like two ordinary processes would.</li>
+      <li style="margin-bottom: 6px;"><strong>Containers on different user-defined networks can't reach each other</strong> unless explicitly connected to both — networks are an isolation boundary by design, not just an organizational label.</li>
+      <li><strong>Overlay networks eat into your MTU budget.</strong> VXLAN encapsulation adds its own header overhead, so the usable payload per packet shrinks — a container-to-container path that ignores this can hit silent fragmentation issues.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="l7-protocols.html">← Previous: L7 HTTP, WebSocket &amp; gRPC</a>
+    <a href="kubernetes-networking.html">Next: Kubernetes Networking →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var steps = [
+    {
+      cmd: null,
+      text: "Initial state: the Docker daemon has already created its docker0 bridge with a private subnet. No containers are running yet.",
+      host: [["docker0 (bridge)", { state: "up", ip: "172.17.0.1/16" }], ["eth0", { state: "up", ip: "203.0.113.9/24" }]],
+      container: null
+    },
+    {
+      cmd: "docker run -d --name web nginx",
+      text: "Docker creates a new, isolated network namespace for the \"web\" container — not connected to anything yet.",
+      host: [["docker0 (bridge)", { state: "up", ip: "172.17.0.1/16" }], ["eth0", { state: "up", ip: "203.0.113.9/24" }]],
+      container: [["lo", { state: "down" }]]
+    },
+    {
+      cmd: "(internally) ip link add veth_host type veth peer name eth0",
+      text: "Docker creates a veth pair: one end will stay on the host, the other becomes eth0 inside the container.",
+      host: [["docker0 (bridge)", { state: "up", ip: "172.17.0.1/16" }], ["eth0", { state: "up", ip: "203.0.113.9/24" }], ["veth_host", { state: "down" }]],
+      container: [["lo", { state: "down" }]],
+      cable: "none"
+    },
+    {
+      cmd: "(internally) ip link set veth_host master docker0",
+      text: "The host end of the veth pair is attached to the docker0 bridge — this is what lets \"web\" reach other containers and, via NAT, the internet.",
+      host: [["docker0 (bridge)", { state: "up", ip: "172.17.0.1/16" }], ["eth0", { state: "up", ip: "203.0.113.9/24" }], ["veth_host → docker0", { state: "up" }]],
+      container: [["lo", { state: "down" }], ["eth0", { state: "down" }]],
+      cable: "split"
+    },
+    {
+      cmd: "(internally) ip addr add 172.17.0.2/16 dev eth0 && ip link set eth0 up && ip link set lo up",
+      text: "The container's eth0 gets an address from docker0's subnet, and both eth0 and lo are brought up — Docker automates the exact steps that were manual on the Linux Networking page.",
+      host: [["docker0 (bridge)", { state: "up", ip: "172.17.0.1/16" }], ["eth0", { state: "up", ip: "203.0.113.9/24" }], ["veth_host → docker0", { state: "up" }]],
+      container: [["lo", { state: "up" }], ["eth0", { state: "up", ip: "172.17.0.2/16" }]],
+      cable: "split"
+    }
+  ];
+
+  var netnsRow = document.getElementById("netnsRow");
+  var cmdLog = document.getElementById("cmdLog");
+  var stepText = document.getElementById("stepText");
+  var stepCounter = document.getElementById("stepCounter");
+  var prevBtn = document.getElementById("prevBtn");
+  var nextBtn = document.getElementById("nextBtn");
+  var resetBtn = document.getElementById("resetBtn");
+  var stepIndex = 0;
+
+  function renderIfaces(list) {
+    if (!list) return "";
+    return list.map(function (entry) {
+      var name = entry[0], props = entry[1];
+      return '<div class="iface-chip"><span>' + name + (props.ip ? ' <span class="ip">' + props.ip + "</span>" : "") + '</span><span class="state-badge ' + props.state + '">' + props.state.toUpperCase() + "</span></div>";
+    }).join("");
+  }
+
+  function renderCable(cable) {
+    if (cable === "split") return '<div class="cable-col"><div class="cable-line"></div><span>veth pair</span></div>';
+    return '<div class="cable-col empty"><div class="cable-line"></div><span>&nbsp;</span></div>';
+  }
+
+  function render() {
+    var step = steps[stepIndex];
+    var hostBox = '<div class="netns-box"><div class="netns-title">Host (root netns)</div>' + renderIfaces(step.host) + "</div>";
+    var containerBox = step.container
+      ? '<div class="netns-box"><div class="netns-title">Container: web</div>' + renderIfaces(step.container) + "</div>"
+      : '<div class="netns-box ghost"><div class="netns-title">Container: web (not created yet)</div></div>';
+
+    netnsRow.innerHTML = hostBox + renderCable(step.cable) + containerBox;
+    stepText.textContent = step.text;
+
+    cmdLog.innerHTML = "";
+    var any = false;
+    for (var i = 0; i <= stepIndex; i++) {
+      if (!steps[i].cmd) continue;
+      any = true;
+      var line = document.createElement("div");
+      line.className = "cmd-line";
+      line.innerHTML = '<span class="prompt">$</span>' + steps[i].cmd;
+      cmdLog.appendChild(line);
+    }
+    if (!any) cmdLog.innerHTML = '<div style="color: var(--text-muted);">No commands run yet — this is the starting state.</div>';
+
+    stepCounter.textContent = "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex === 0;
+    nextBtn.disabled = stepIndex === steps.length - 1;
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > 0) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", function () { stepIndex = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L4: TCP vs UDP — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  /* ---------------- Sliding window demo ---------------- */
+  .window-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .window-controls label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .window-controls input[type="range"] { width: 160px; }
+  .seg-row { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 14px; }
+  .seg-box {
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  }
+  .seg-box.acked { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .seg-box.inflight { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+
+  /* ---------------- Congestion window chart ---------------- */
+  .viz-root {
+    --viz-surface: var(--bg-elevated);
+    --viz-ink: var(--text);
+    --viz-muted: var(--text-muted);
+    --viz-grid: var(--border);
+    --viz-good: var(--ok);
+    --viz-info: var(--accent);
+    --viz-critical: var(--danger);
+  }
+  .cwnd-chart-wrap { width: 100%; overflow-x: auto; }
+  .cwnd-chart-wrap svg { width: 100%; height: auto; min-width: 480px; }
+  .cwnd-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--text);
+    color: #fff;
+    font-size: 0.78rem;
+    padding: 6px 9px;
+    border-radius: 6px;
+    box-shadow: var(--shadow);
+    opacity: 0;
+    transition: opacity 0.1s ease;
+    white-space: nowrap;
+    z-index: 5;
+  }
+  .cwnd-tooltip.visible { opacity: 1; }
+  .cwnd-chart-container { position: relative; }
+  .cwnd-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; }
+  .cwnd-legend span { display: flex; align-items: center; gap: 6px; }
+  .cwnd-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Deep Dive · Layer 4</span>
+    <h1>TCP vs UDP</h1>
+    <p>Both TCP and UDP sit at Layer 4 and both use <span class="term" data-tip="A 16-bit number identifying which application on a host a segment or datagram belongs to.">port numbers</span> to reach the right application — but they make almost opposite tradeoffs to get there. TCP spends effort guaranteeing delivery; UDP spends none, and hands that job to whoever's using it.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Side by side</h3>
+    <table>
+      <thead><tr><th>Property</th><th>TCP</th><th>UDP</th></tr></thead>
+      <tbody>
+        <tr><td>Connection</td><td>Connection-oriented — <a href="tcp-handshake.html">three-way handshake</a> required</td><td>Connectionless — just send</td></tr>
+        <tr><td>Reliability</td><td>Guaranteed delivery via acknowledgment and retransmission</td><td>No guarantee — a lost datagram simply vanishes</td></tr>
+        <tr><td>Ordering</td><td>Guaranteed in-order delivery to the application</td><td>No ordering guarantee</td></tr>
+        <tr><td>Flow control</td><td><span class="term" data-tip="A mechanism where the receiver advertises how much unacknowledged data it can buffer, and the sender never exceeds it -- prevents a fast sender from overwhelming a slow receiver.">Sliding window</span> (demo below)</td><td>None</td></tr>
+        <tr><td>Congestion control</td><td>Yes — backs off automatically when the network is overloaded</td><td>None — the application must self-limit</td></tr>
+        <tr><td>Header overhead</td><td>20+ bytes</td><td>8 bytes</td></tr>
+        <tr><td>Typical uses</td><td>Web (HTTP), email, file transfer, SSH</td><td>DNS queries, voice/video calls, gaming, live streaming</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Flow control: the sliding window</h3>
+    <p style="margin-top: 0;">A receiver only has so much buffer space. Its <span class="term" data-tip="The amount of unacknowledged data the receiver is currently willing to buffer. Advertised in every TCP ACK, and can shrink or grow as the receiver's own buffer fills or drains.">receive window</span> tells the sender exactly how many unacknowledged segments it can have in flight at once. Every time an ACK arrives, the window slides forward by one, making room to send the next segment. Try sliding the window yourself:</p>
+
+    <div class="window-controls">
+      <label for="windowSizeInput">Window size</label>
+      <input type="range" id="windowSizeInput" min="2" max="10" value="5">
+      <span class="mono" id="windowSizeValue">5</span> segments
+    </div>
+
+    <div class="seg-row" id="segRow"></div>
+
+    <div class="panel" id="windowText" style="margin-bottom: 14px;"></div>
+
+    <div class="controls" style="margin-top: 0;">
+      <button class="btn" id="windowResetBtn">⟲ Reset</button>
+      <button class="btn btn-primary" id="windowAckBtn">Simulate next ACK ▶</button>
+    </div>
+  </div>
+
+  <div class="card viz-root" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Congestion control: the TCP sawtooth</h3>
+    <p style="margin-top: 0;">Beyond the receiver's window, TCP also tracks its own estimate of how much the <em>network</em> can handle: the <span class="term" data-tip="Congestion window (cwnd) -- the sender's own self-imposed limit on in-flight data, separate from the receiver's advertised window. The sender can never send more than the smaller of the two.">congestion window (cwnd)</span>. It starts small and grows — fast at first, then cautiously — until a loss tells it to back off. Repeated over time this produces TCP's famous sawtooth shape:</p>
+
+    <div class="cwnd-chart-container">
+      <div class="cwnd-chart-wrap">
+        <svg id="cwndChart" viewBox="0 0 640 280" role="img" aria-label="TCP congestion window over time, showing slow start, congestion avoidance, and a loss event"></svg>
+      </div>
+      <div class="cwnd-tooltip" id="cwndTooltip"></div>
+    </div>
+    <div class="cwnd-legend">
+      <span><span class="cwnd-swatch" style="background: var(--viz-good);"></span> Slow start — cwnd doubles every round trip</span>
+      <span><span class="cwnd-swatch" style="background: var(--viz-info);"></span> Congestion avoidance — cwnd grows by 1 per round trip</span>
+      <span><span class="cwnd-swatch" style="background: var(--viz-critical);"></span> Loss event — <span class="term" data-tip="Slow-start threshold -- the cwnd value above which TCP switches from fast exponential growth to cautious linear growth. Reset to half of cwnd whenever a loss occurs.">ssthresh</span> halves, cwnd drops with it</span>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">Hover the chart to read exact values. <strong>Why it looks like this:</strong> growing exponentially (slow start) would risk overshooting the network's real capacity, so TCP switches to a cautious linear climb (congestion avoidance) once it's in roughly the right range — then treats any loss as a signal it pushed too far, and cuts back hard before climbing again.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">When to reach for which</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Choose TCP</strong> when correctness matters more than latency: a web page, an email, a file — nobody wants a byte silently missing from a downloaded file just because it arrived a little faster.</li>
+      <li style="margin-bottom: 6px;"><strong>Choose UDP</strong> when timeliness matters more than completeness: in a live video call, a frame that arrives late is useless anyway — better to drop it and move on than have TCP stall everything waiting to retransmit it.</li>
+      <li><strong>Or build your own reliability on UDP</strong>, which is exactly what <span class="term" data-tip="The transport protocol HTTP/3 runs over. Built on UDP, but adds its own reliability, ordering, and encryption -- while avoiding TCP's head-of-line blocking, since one stream's loss doesn't stall the others.">QUIC</span> (and therefore HTTP/3) does — reliable and ordered <em>per stream</em>, without inheriting TCP's single ordered pipe for an entire connection.</li>
+    </ul>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>UDP isn't "unreliable garbage."</strong> It's a deliberate choice to skip guarantees an application doesn't need, or plans to build itself, more cheaply than TCP can.</li>
+      <li style="margin-bottom: 6px;"><strong>TCP's reliability has a latency cost.</strong> <span class="term" data-tip="When one lost or delayed segment blocks the delivery of every segment that arrived after it, even though the application could otherwise use them -- because TCP must deliver in order.">Head-of-line blocking</span> means one lost segment stalls everything behind it, even data that already arrived safely.</li>
+      <li style="margin-bottom: 6px;"><strong>A bigger window isn't automatically faster.</strong> If the window exceeds the path's actual <span class="term" data-tip="Bandwidth-delay product -- the amount of data that can be 'in flight' on a path at once, equal to bandwidth × round-trip time. A window smaller than this under-uses the link; a window much larger than this just sits idle.">bandwidth-delay product</span>, the extra capacity just sits unused — matching the two is what TCP window scaling exists for.</li>
+      <li><strong>Congestion control isn't optional politeness — it's what keeps the internet from collapsing.</strong> Every TCP flow backing off under congestion is what lets millions of unrelated connections share the same links without a tragedy-of-the-commons meltdown.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="firewalls.html">← Previous: Firewalls &amp; Rules</a>
+    <a href="l7-protocols.html">Next: L7 HTTP, WebSocket &amp; gRPC →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Sliding window demo ----------------
+  var TOTAL_SEGMENTS = 20;
+  var windowSizeInput = document.getElementById("windowSizeInput");
+  var windowSizeValue = document.getElementById("windowSizeValue");
+  var segRow = document.getElementById("segRow");
+  var windowText = document.getElementById("windowText");
+  var windowAckBtn = document.getElementById("windowAckBtn");
+  var windowResetBtn = document.getElementById("windowResetBtn");
+
+  var base = 1; // oldest unacked segment number
+
+  function renderWindow() {
+    var windowSize = parseInt(windowSizeInput.value, 10);
+    windowSizeValue.textContent = windowSize;
+    segRow.innerHTML = "";
+    for (var i = 1; i <= TOTAL_SEGMENTS; i++) {
+      var box = document.createElement("div");
+      box.className = "seg-box";
+      if (i < base) box.className += " acked";
+      else if (i < base + windowSize) box.className += " inflight";
+      box.textContent = i;
+      segRow.appendChild(box);
+    }
+    var inflightCount = Math.min(windowSize, TOTAL_SEGMENTS - base + 1);
+    if (base > TOTAL_SEGMENTS) {
+      windowText.textContent = "All " + TOTAL_SEGMENTS + " segments acknowledged — the sender is done.";
+    } else {
+      windowText.textContent = "Window covers segments " + base + "–" + Math.min(base + windowSize - 1, TOTAL_SEGMENTS) + " (" + inflightCount + " in flight, unacknowledged). Segments before " + base + " are acknowledged; segments after the window can't be sent yet — the receiver hasn't made room for them.";
+    }
+    windowAckBtn.disabled = base > TOTAL_SEGMENTS;
+  }
+
+  windowSizeInput.addEventListener("input", renderWindow);
+  windowAckBtn.addEventListener("click", function () {
+    base++;
+    renderWindow();
+  });
+  windowResetBtn.addEventListener("click", function () {
+    base = 1;
+    renderWindow();
+  });
+  renderWindow();
+
+  // ---------------- Congestion window chart ----------------
+  var cwndData = [
+    { round: 0, cwnd: 1, phase: "slow-start" },
+    { round: 1, cwnd: 2, phase: "slow-start" },
+    { round: 2, cwnd: 4, phase: "slow-start" },
+    { round: 3, cwnd: 8, phase: "slow-start" },
+    { round: 4, cwnd: 16, phase: "slow-start" },
+    { round: 5, cwnd: 17, phase: "congestion-avoidance" },
+    { round: 6, cwnd: 18, phase: "congestion-avoidance" },
+    { round: 7, cwnd: 19, phase: "congestion-avoidance" },
+    { round: 8, cwnd: 20, phase: "congestion-avoidance" },
+    { round: 9, cwnd: 21, phase: "congestion-avoidance" },
+    { round: 10, cwnd: 22, phase: "congestion-avoidance" },
+    { round: 11, cwnd: 23, phase: "congestion-avoidance" },
+    { round: 12, cwnd: 24, phase: "loss" },
+    { round: 13, cwnd: 12, phase: "congestion-avoidance" },
+    { round: 14, cwnd: 13, phase: "congestion-avoidance" },
+    { round: 15, cwnd: 14, phase: "congestion-avoidance" },
+    { round: 16, cwnd: 15, phase: "congestion-avoidance" },
+    { round: 17, cwnd: 16, phase: "congestion-avoidance" },
+    { round: 18, cwnd: 17, phase: "congestion-avoidance" },
+    { round: 19, cwnd: 18, phase: "congestion-avoidance" },
+    { round: 20, cwnd: 19, phase: "congestion-avoidance" }
+  ];
+
+  var svg = document.getElementById("cwndChart");
+  var tooltip = document.getElementById("cwndTooltip");
+  var chartContainer = document.querySelector(".cwnd-chart-container");
+
+  var W = 640, H = 280;
+  var padL = 44, padR = 16, padT = 28, padB = 34;
+  var plotW = W - padL - padR;
+  var plotH = H - padT - padB;
+  var maxRound = 20;
+  var maxCwnd = 30;
+
+  function xScale(round) { return padL + (round / maxRound) * plotW; }
+  function yScale(cwnd) { return padT + plotH - (cwnd / maxCwnd) * plotH; }
+
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (var k in attrs) el.setAttribute(k, attrs[k]);
+    return el;
+  }
+
+  function buildChart() {
+    svg.innerHTML = "";
+    var style = getComputedStyle(document.documentElement);
+    var colGood = style.getPropertyValue("--ok").trim();
+    var colInfo = style.getPropertyValue("--accent").trim();
+    var colCritical = style.getPropertyValue("--danger").trim();
+    var colGrid = style.getPropertyValue("--border").trim();
+    var colInk = style.getPropertyValue("--text").trim();
+    var colMuted = style.getPropertyValue("--text-muted").trim();
+
+    // Phase background bands
+    var bands = [
+      { from: 0, to: 4, color: colGood, label: "Slow start" },
+      { from: 4, to: 12, color: colInfo, label: "Congestion avoidance" },
+      { from: 12, to: 13, color: colCritical, label: "Loss" },
+      { from: 13, to: 20, color: colInfo, label: "Congestion avoidance (resumed)" }
+    ];
+    bands.forEach(function (b) {
+      var rect = svgEl("rect", {
+        x: xScale(b.from), y: padT,
+        width: xScale(b.to) - xScale(b.from), height: plotH,
+        fill: b.color, opacity: "0.10"
+      });
+      svg.appendChild(rect);
+    });
+
+    // Gridlines + y ticks
+    [0, 10, 20, 30].forEach(function (tick) {
+      var y = yScale(tick);
+      svg.appendChild(svgEl("line", { x1: padL, x2: W - padR, y1: y, y2: y, stroke: colGrid, "stroke-width": "1" }));
+      var label = svgEl("text", { x: padL - 8, y: y + 4, "text-anchor": "end", "font-size": "11", fill: colMuted });
+      label.textContent = tick;
+      svg.appendChild(label);
+    });
+
+    // X ticks
+    [0, 5, 10, 15, 20].forEach(function (tick) {
+      var x = xScale(tick);
+      var label = svgEl("text", { x: x, y: H - padB + 18, "text-anchor": "middle", "font-size": "11", fill: colMuted });
+      label.textContent = "RTT " + tick;
+      svg.appendChild(label);
+    });
+
+    // Band labels
+    var bandLabelPositions = [
+      { from: 0, to: 4, text: "Slow start" },
+      { from: 4, to: 12, text: "Congestion avoidance" },
+      { from: 13, to: 20, text: "Congestion avoidance" }
+    ];
+    bandLabelPositions.forEach(function (b) {
+      var midX = (xScale(b.from) + xScale(b.to)) / 2;
+      var label = svgEl("text", { x: midX, y: padT - 10, "text-anchor": "middle", "font-size": "10", fill: colMuted });
+      label.textContent = b.text;
+      svg.appendChild(label);
+    });
+
+    // Line path
+    var d = cwndData.map(function (p, i) {
+      return (i === 0 ? "M" : "L") + xScale(p.round) + "," + yScale(p.cwnd);
+    }).join(" ");
+    svg.appendChild(svgEl("path", { d: d, fill: "none", stroke: colInk, "stroke-width": "2", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+
+    // End marker
+    var last = cwndData[cwndData.length - 1];
+    var endDot = svgEl("circle", { cx: xScale(last.round), cy: yScale(last.cwnd), r: "5", fill: colInk, stroke: style.getPropertyValue("--bg-elevated").trim(), "stroke-width": "2" });
+    svg.appendChild(endDot);
+    var endLabel = svgEl("text", { x: xScale(last.round) - 6, y: yScale(last.cwnd) - 10, "text-anchor": "end", "font-size": "11", fill: colInk, "font-weight": "700" });
+    endLabel.textContent = "cwnd=" + last.cwnd;
+    svg.appendChild(endLabel);
+
+    // Loss event marker
+    var lossPoint = cwndData.filter(function (p) { return p.phase === "loss"; })[0];
+    if (lossPoint) {
+      var lossDot = svgEl("circle", { cx: xScale(lossPoint.round), cy: yScale(lossPoint.cwnd), r: "5", fill: colCritical, stroke: style.getPropertyValue("--bg-elevated").trim(), "stroke-width": "2" });
+      svg.appendChild(lossDot);
+    }
+
+    // Hover crosshair + hit layer
+    var crosshair = svgEl("line", { x1: 0, x2: 0, y1: padT, y2: padT + plotH, stroke: colMuted, "stroke-width": "1", "stroke-dasharray": "3,3", opacity: "0" });
+    svg.appendChild(crosshair);
+
+    var hoverDot = svgEl("circle", { r: "5", fill: colInk, stroke: style.getPropertyValue("--bg-elevated").trim(), "stroke-width": "2", opacity: "0" });
+    svg.appendChild(hoverDot);
+
+    var hitRect = svgEl("rect", { x: padL, y: padT, width: plotW, height: plotH, fill: "transparent" });
+    svg.appendChild(hitRect);
+
+    function showTooltipAt(round) {
+      var point = cwndData[round];
+      if (!point) return;
+      crosshair.setAttribute("x1", xScale(point.round));
+      crosshair.setAttribute("x2", xScale(point.round));
+      crosshair.setAttribute("opacity", "1");
+      hoverDot.setAttribute("cx", xScale(point.round));
+      hoverDot.setAttribute("cy", yScale(point.cwnd));
+      hoverDot.setAttribute("opacity", "1");
+
+      var phaseLabel = point.phase === "slow-start" ? "Slow start" : point.phase === "loss" ? "Loss event" : "Congestion avoidance";
+      tooltip.textContent = "RTT " + point.round + " — cwnd = " + point.cwnd + " (" + phaseLabel + ")";
+
+      var containerRect = chartContainer.getBoundingClientRect();
+      var svgRect = svg.getBoundingClientRect();
+      var scaleX = svgRect.width / W;
+      var scaleY = svgRect.height / H;
+      var left = (svgRect.left - containerRect.left) + xScale(point.round) * scaleX + 10;
+      var top = (svgRect.top - containerRect.top) + yScale(point.cwnd) * scaleY - 30;
+      tooltip.style.left = left + "px";
+      tooltip.style.top = top + "px";
+      tooltip.classList.add("visible");
+    }
+
+    function hideTooltip() {
+      crosshair.setAttribute("opacity", "0");
+      hoverDot.setAttribute("opacity", "0");
+      tooltip.classList.remove("visible");
+    }
+
+    hitRect.addEventListener("mousemove", function (e) {
+      var svgRect = svg.getBoundingClientRect();
+      var scaleX = svgRect.width / W;
+      var relX = (e.clientX - svgRect.left) / scaleX;
+      var round = Math.round(((relX - padL) / plotW) * maxRound);
+      round = Math.max(0, Math.min(maxRound, round));
+      showTooltipAt(round);
+    });
+    hitRect.addEventListener("mouseleave", hideTooltip);
+  }
+
+  buildChart();
+  window.addEventListener("resize", buildChart);
+})();
+</script>
+</body>
+</html>

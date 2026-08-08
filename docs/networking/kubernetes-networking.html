@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kubernetes Networking — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .flat-diagram { display: flex; gap: 20px; margin: 16px 0; flex-wrap: wrap; }
+  .node-box { flex: 1; min-width: 160px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--bg-elevated); }
+  .node-title { font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 8px; }
+  .pod-chip { padding: 7px 10px; border-radius: 7px; background: var(--code-bg); border: 1px solid var(--code-border); font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; margin-bottom: 6px; }
+
+  /* Life of a request */
+  .hop-row { display: flex; align-items: center; gap: 10px; }
+  .hop-node { flex: 0 0 auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+  .hop-line { flex: 1; position: relative; height: 2px; background: var(--accent); margin: 18px 4px 0; }
+  .hop-line::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .diagram { display: flex; flex-direction: column; gap: 20px; padding: 10px 4px; min-height: 40px; }
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+
+  /* DNS naming tool */
+  .dns-fields { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; }
+  .dns-fields .field { display: flex; flex-direction: column; gap: 6px; }
+  .dns-fields .field label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .dns-fields input { width: 200px; }
+
+  /* NetworkPolicy demo */
+  .np-toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 0.9rem; }
+  .np-row { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+  .np-pod { flex: 0 0 200px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; padding: 8px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg-elevated); }
+  .np-arrow { color: var(--text-muted); }
+  .np-target { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Deep Dive · Orchestration</span>
+    <h1>Kubernetes Networking</h1>
+    <p>Kubernetes starts from one strict rule — the <span class="term" data-tip="Every Pod gets a real, cluster-routable IP. Any Pod can reach any other Pod's IP directly, without NAT, even across different nodes -- as if they were all on one flat LAN.">flat network model</span> — and everything else on this page (Services, Ingress, NetworkPolicy) exists to make that flat, wide-open network usable and safe at scale.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">The flat network model</h3>
+    <p style="margin-top: 0;">Kubernetes requires: every <span class="term" data-tip="The smallest deployable unit in Kubernetes -- one or more containers that always share a network namespace, so they share one IP and can reach each other over localhost.">Pod</span> gets its own cluster-wide IP; any Pod can reach any other Pod's IP directly, with no NAT, even across nodes; and a Pod sees the same IP for itself that everyone else sees for it. Unlike the <a href="container-networking.html">Docker bridge network</a> you saw on the previous page, where a container's IP is only meaningful inside its own host, a Pod IP is routable cluster-wide from the moment it's created.</p>
+    <div class="flat-diagram">
+      <div class="node-box">
+        <div class="node-title">Node A</div>
+        <div class="pod-chip">frontend-x7d 10.244.1.5</div>
+        <div class="pod-chip">cache-2ab 10.244.1.6</div>
+      </div>
+      <div class="node-box">
+        <div class="node-title">Node B</div>
+        <div class="pod-chip">backend-q9f 10.244.2.3</div>
+        <div class="pod-chip">db-1kd 10.244.2.4</div>
+      </div>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;"><code>frontend-x7d</code> on Node A can open a connection straight to <code>10.244.2.3</code> on Node B — no port mapping, no translation, exactly like two hosts on the same LAN.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">How pods get that flat network: CNI</h3>
+    <p style="margin-top: 0;">Kubernetes itself doesn't implement the flat network — it delegates to a <span class="term" data-tip="Container Network Interface -- a plugin standard. Kubelet calls the configured CNI plugin every time a Pod is created or destroyed, and the plugin does the actual networking setup.">CNI</span> plugin. When a Pod is scheduled, kubelet calls the plugin, which creates the Pod's network namespace, wires up a veth pair (the same primitive again), assigns an IP, and configures whatever mechanism makes that IP reachable from every other node.</p>
+    <table>
+      <thead><tr><th>CNI plugin</th><th>How it makes Pod IPs reachable across nodes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">Flannel</td><td>Wraps Pod traffic in <span class="term" data-tip="Virtual Extensible LAN -- encapsulates a Layer 2 frame inside a Layer 3/4 UDP packet so it can tunnel across regular IP routing between nodes.">VXLAN</span> tunnels between nodes — simple to run, with tunneling overhead on every packet.</td></tr>
+        <tr><td class="mono">Calico</td><td>Uses real routing (often BGP) so Pod IPs are just normal routes — no tunnel encapsulation overhead, but requires routable infrastructure.</td></tr>
+        <tr><td class="mono">Cilium</td><td>Uses <span class="term" data-tip="Extended Berkeley Packet Filter -- lets programs run inside the Linux kernel safely and be attached to network events, avoiding a lot of the overhead of traditional iptables-based packet processing.">eBPF</span> to move packets without iptables at all, adding rich L3-L7 visibility and policy enforcement along the way.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Services: a stable address for a moving target</h3>
+    <p style="margin-top: 0;">Pods are disposable — rescheduled, restarted, replaced, each time with a new IP. A <span class="term" data-tip="A Kubernetes object that gives a stable virtual IP and DNS name to a changing set of Pods, selected by matching labels rather than hardcoded IPs.">Service</span> gives callers one stable thing to talk to, no matter how many times the Pods behind it change.</p>
+    <table>
+      <thead><tr><th>Type</th><th>What it adds</th><th>Reachable from</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">ClusterIP</td><td>A stable virtual IP, load-balanced across matching Pods (the default type)</td><td>Inside the cluster only</td></tr>
+        <tr><td class="mono">NodePort</td><td>ClusterIP, plus the same static port (30000-32767) opened on every node's IP</td><td>Anywhere that can reach any node</td></tr>
+        <tr><td class="mono">LoadBalancer</td><td>NodePort, plus a real external load balancer provisioned by the cloud provider pointing at it</td><td>The public internet (if the LB is public)</td></tr>
+        <tr><td class="mono">Headless (<code>clusterIP: None</code>)</td><td>No virtual IP at all — DNS returns the individual Pod IPs directly</td><td>Callers that specifically want to address Pods themselves, e.g. StatefulSets</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Life of a request: Ingress → Service → kube-proxy → Pod</h3>
+    <p style="margin-top: 0;">Step through what actually happens when a browser hits a URL that's ultimately served by one Pod out of several.</p>
+
+    <div class="diagram" id="lorDiagram"></div>
+    <div class="panel step-text" id="lorStepText" style="margin-top: 6px;"></div>
+
+    <div class="controls">
+      <button class="btn" id="lorResetBtn">⟲ Reset</button>
+      <button class="btn" id="lorPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="lorNextBtn">Next ▶</button>
+      <span class="step-counter" id="lorStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Cluster DNS naming</h3>
+    <p style="margin-top: 0;">Every Service automatically gets a name in <a href="dns-resolution.html">cluster DNS</a>, served by <span class="term" data-tip="The DNS server that runs as pods inside the cluster itself, automatically creating a DNS record for every Service.">CoreDNS</span>. Try it:</p>
+    <div class="dns-fields">
+      <div class="field">
+        <label for="svcNameInput">Service name</label>
+        <input type="text" id="svcNameInput" value="backend">
+      </div>
+      <div class="field">
+        <label for="nsInput">Namespace</label>
+        <input type="text" id="nsInput" value="prod">
+      </div>
+    </div>
+    <div class="panel" id="dnsOutput"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Ingress: Layer 7 routing into the cluster</h3>
+    <p style="margin-top: 0;">An Ingress is just a set of routing rules — host and path to Service — not a running proxy by itself. It only works because an <span class="term" data-tip="A controller (running as ordinary Pods, usually exposed via a LoadBalancer Service) that watches Ingress objects and actually implements their routing rules -- e.g. ingress-nginx or Traefik.">Ingress Controller</span> is deployed to actually read those rules and act on them, letting one entry point route to many Services instead of paying for a LoadBalancer Service per Service.</p>
+    <table>
+      <thead><tr><th>Host</th><th>Path</th><th>Routed to Service</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">shop.example.com</td><td class="mono">/api</td><td class="mono">orders-svc:80</td></tr>
+        <tr><td class="mono">shop.example.com</td><td class="mono">/</td><td class="mono">storefront-svc:80</td></tr>
+        <tr><td class="mono">admin.example.com</td><td class="mono">/</td><td class="mono">admin-svc:80</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">NetworkPolicy: pod-level firewalling</h3>
+    <p style="margin-top: 0;">The flat network model means, by default, <strong>any</strong> Pod can reach <strong>any</strong> other Pod — there's no isolation at all until you add one. The moment a <span class="term" data-tip="A Kubernetes object that restricts which Pods can connect to which, matched by label selectors -- the closest thing Kubernetes has to a built-in firewall between Pods.">NetworkPolicy</span> selects a Pod for ingress, that Pod flips from default-allow to default-deny-except-what's-listed.</p>
+
+    <label class="np-toggle">
+      <input type="checkbox" id="npToggle"> Enable NetworkPolicy on <code>database</code>: allow only Pods labeled <code>role: backend</code>, port 5432
+    </label>
+
+    <div id="npRows"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>NetworkPolicy needs CNI support to mean anything.</strong> The object can exist and be accepted by the API server while doing nothing at all if your CNI plugin doesn't enforce it — plain Flannel, for instance, doesn't out of the box.</li>
+      <li style="margin-bottom: 6px;"><strong>Services load-balance at L4, not L7.</strong> kube-proxy has no idea what an HTTP path or header is — routing on those requires Ingress or a service mesh sitting on top.</li>
+      <li style="margin-bottom: 6px;"><strong>A NodePort opens on every node</strong>, whether or not that node happens to be running a matching Pod — kube-proxy forwards internally to wherever the Pod actually is, but the port itself is exposed everywhere.</li>
+      <li><strong>Headless Services skip load balancing entirely.</strong> A caller expecting one stable IP will instead see multiple A records if it's accidentally pointed at a headless Service — the caller has to handle that itself.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="container-networking.html">← Previous: Container Networking</a>
+    <a href="index.html">Back to overview →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Life of a request ----------------
+  var lorSteps = [
+    { from: "Client", to: "Ingress Controller", text: "Client requests https://shop.example.com/api/orders. DNS already resolved shop.example.com to the Ingress Controller's external address." },
+    { from: "Ingress Controller", to: "orders-svc (ClusterIP)", text: "The Ingress Controller matches the Host header and /api path against its routing rules and forwards to the orders-svc Service's ClusterIP." },
+    { from: "orders-svc (ClusterIP)", to: "kube-proxy rule", text: "Traffic to the ClusterIP hits a rule kube-proxy programmed (iptables or IPVS) covering every Pod currently behind orders-svc." },
+    { from: "kube-proxy rule", to: "Pod orders-7f9d", text: "kube-proxy picks one healthy backend Pod (here, orders-7f9d at 172.17.2.5:8080) and DNATs the packet to it." },
+    { from: "Pod orders-7f9d", to: "Client", text: "The Pod handles the request and replies. The response retraces the same path — conntrack remembers the translation, the same way NAT does on the L3 page." }
+  ];
+
+  var lorDiagram = document.getElementById("lorDiagram");
+  var lorStepText = document.getElementById("lorStepText");
+  var lorStepCounter = document.getElementById("lorStepCounter");
+  var lorPrevBtn = document.getElementById("lorPrevBtn");
+  var lorNextBtn = document.getElementById("lorNextBtn");
+  var lorResetBtn = document.getElementById("lorResetBtn");
+  var lorStepIndex = 0;
+
+  function renderLor() {
+    lorDiagram.innerHTML = "";
+    for (var i = 0; i <= lorStepIndex; i++) {
+      var step = lorSteps[i];
+      var row = document.createElement("div");
+      row.className = "hop-row";
+      row.innerHTML = '<div class="hop-node">' + step.from + '</div><div class="hop-line"></div><div class="hop-node">' + step.to + "</div>";
+      lorDiagram.appendChild(row);
+    }
+    lorStepText.textContent = lorSteps[lorStepIndex].text;
+    lorStepCounter.textContent = "Step " + (lorStepIndex + 1) + " / " + lorSteps.length;
+    lorPrevBtn.disabled = lorStepIndex === 0;
+    lorNextBtn.disabled = lorStepIndex === lorSteps.length - 1;
+  }
+
+  lorPrevBtn.addEventListener("click", function () { if (lorStepIndex > 0) { lorStepIndex--; renderLor(); } });
+  lorNextBtn.addEventListener("click", function () { if (lorStepIndex < lorSteps.length - 1) { lorStepIndex++; renderLor(); } });
+  lorResetBtn.addEventListener("click", function () { lorStepIndex = 0; renderLor(); });
+  renderLor();
+
+  // ---------------- Cluster DNS naming tool ----------------
+  var svcNameInput = document.getElementById("svcNameInput");
+  var nsInput = document.getElementById("nsInput");
+  var dnsOutput = document.getElementById("dnsOutput");
+
+  function sanitizeDnsLabel(s) {
+    return (s || "").trim().toLowerCase().replace(/[^a-z0-9-]/g, "") || "service";
+  }
+
+  function renderDnsTool() {
+    var svc = sanitizeDnsLabel(svcNameInput.value);
+    var ns = sanitizeDnsLabel(nsInput.value);
+    var fqdn = svc + "." + ns + ".svc.cluster.local";
+    dnsOutput.innerHTML =
+      "<div><strong>Full name (from anywhere in the cluster):</strong> <span class=\"mono\">" + fqdn + "</span></div>" +
+      "<div style=\"margin-top: 6px;\"><strong>Short name (from a Pod already inside " + ns + "):</strong> <span class=\"mono\">" + svc + "</span></div>";
+  }
+
+  svcNameInput.addEventListener("input", renderDnsTool);
+  nsInput.addEventListener("input", renderDnsTool);
+  renderDnsTool();
+
+  // ---------------- NetworkPolicy demo ----------------
+  var npToggle = document.getElementById("npToggle");
+  var npRows = document.getElementById("npRows");
+  var npPods = [
+    { name: "frontend-x7d", label: "role: frontend" },
+    { name: "backend-q9f", label: "role: backend" },
+    { name: "backend-r2s", label: "role: backend" },
+    { name: "unknown-pod-88a", label: "role: other" }
+  ];
+
+  function renderNp() {
+    var enabled = npToggle.checked;
+    npRows.innerHTML = "";
+    npPods.forEach(function (pod) {
+      var allowed = !enabled || pod.label === "role: backend";
+      var row = document.createElement("div");
+      row.className = "np-row";
+      row.innerHTML =
+        '<div class="np-pod">' + pod.name + '<br><span style="color: var(--text-muted); font-size: 0.75rem;">' + pod.label + "</span></div>" +
+        '<span class="np-arrow">──▶</span>' +
+        '<span class="np-target">database:5432</span>' +
+        '<span class="badge ' + (allowed ? "badge-ok" : "badge-danger") + '" style="margin-left: 10px;">' + (allowed ? "Allowed" : "Blocked") + "</span>";
+      npRows.appendChild(row);
+    });
+  }
+
+  npToggle.addEventListener("change", renderNp);
+  renderNp();
+})();
+</script>
+</body>
+</html>

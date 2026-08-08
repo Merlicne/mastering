@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>L7: HTTP, WebSocket &amp; gRPC — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  /* Protocol timeline demo */
+  .proto-tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+  .proto-tab {
+    padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--bg-elevated); color: var(--text); font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  }
+  .proto-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .proto-loss-toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 0.88rem; }
+
+  .timeline-setup { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; font-family: "SFMono-Regular", Consolas, monospace; }
+  .timeline-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+  .timeline-label { flex: 0 0 110px; font-size: 0.78rem; font-family: "SFMono-Regular", Consolas, monospace; color: var(--text-muted); }
+  .timeline-track { flex: 1; height: 20px; background: var(--code-bg); border-radius: 4px; position: relative; overflow: hidden; }
+  .timeline-seg { position: absolute; top: 0; height: 100%; border-radius: 4px; }
+  .timeline-seg.setup { background: var(--text-muted); opacity: 0.5; }
+  .timeline-seg.active { background: var(--accent); }
+  .timeline-seg.blocked { background: var(--danger); background-image: repeating-linear-gradient(45deg, rgba(255,255,255,0.3) 0 4px, transparent 4px 8px); }
+  .timeline-legend { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.8rem; color: var(--text-muted); margin: 10px 0 0; }
+  .timeline-legend span { display: flex; align-items: center; gap: 6px; }
+  .timeline-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .timeline-note { margin-top: 12px; }
+
+  /* Request/response anatomy */
+  .http-block {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.85rem;
+    background: var(--code-bg);
+    border: 1px solid var(--code-border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    line-height: 1.7;
+    white-space: pre-wrap;
+  }
+
+  /* Status codes */
+  .status-row td:first-child { font-family: "SFMono-Regular", Consolas, monospace; font-weight: 700; }
+
+  /* WebSocket demo */
+  .ws-log { margin-top: 12px; }
+  .ws-msg { display: flex; margin-bottom: 6px; }
+  .ws-msg.client { justify-content: flex-start; }
+  .ws-msg.server { justify-content: flex-end; }
+  .ws-bubble { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 0.85rem; font-family: "SFMono-Regular", Consolas, monospace; }
+  .ws-msg.client .ws-bubble { background: var(--accent); color: var(--accent-ink); border-bottom-left-radius: 2px; }
+  .ws-msg.server .ws-bubble { background: var(--code-bg); border: 1px solid var(--code-border); border-bottom-right-radius: 2px; }
+
+  /* gRPC modes */
+  .grpc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 14px; }
+  .grpc-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--bg-elevated); }
+  .grpc-card h4 { margin: 0 0 8px; font-size: 0.95rem; }
+  .grpc-diagram { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; color: var(--text-muted); line-height: 1.8; }
+
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Deep Dive · Layer 7</span>
+    <h1>HTTP, WebSocket &amp; gRPC</h1>
+    <p><span class="term" data-tip="HyperText Transfer Protocol -- an application-layer, request/response protocol. Almost everything you do in a browser is HTTP requests and responses underneath.">HTTP</span> is <span class="term" data-tip="Each request is handled with no memory of previous requests. Any 'session' feeling (being logged in, a shopping cart) is built on top, usually with cookies, not by HTTP itself.">stateless</span> and request/response: the client always speaks first. That simple rule has shaped, and limited, everything built on top of it — including why WebSocket and gRPC exist at all.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Why the HTTP versions changed</h3>
+    <table>
+      <thead><tr><th>Version</th><th>Year</th><th>What changed, and why</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">0.9</td><td>1991</td><td>One line, one method (GET), no headers, HTML only. The connection closed after every response.</td></tr>
+        <tr><td class="mono">1.0</td><td>1996</td><td>Added headers, status codes, other content types — but still opened a brand new TCP connection (and did a fresh handshake) for every single request.</td></tr>
+        <tr><td class="mono">1.1</td><td>1997</td><td>Added persistent connections (<code>keep-alive</code>) so multiple requests could reuse one TCP connection — but browsers still had to open ~6 parallel connections per host to load a page's assets concurrently, each paying its own setup cost.</td></tr>
+        <tr><td class="mono">2</td><td>2015</td><td>Binary framing lets many logical streams share <em>one</em> TCP connection (<span class="term" data-tip="Interleaving multiple independent request/response streams over a single connection, instead of one stream per connection.">multiplexing</span>), plus header compression. Fixes the "too many connections" problem — but a lost TCP segment still stalls every stream, because they all share one ordered TCP byte stream underneath.</td></tr>
+        <tr><td class="mono">3</td><td>2022</td><td>Runs over <span class="term" data-tip="Quick UDP Internet Connections -- a transport protocol built on UDP that HTTP/3 uses instead of TCP. It implements its own reliability, but per-stream instead of as one shared ordered byte stream.">QUIC</span> instead of TCP. Each stream is reliable on its own, so a lost packet only stalls the one stream it belonged to — plus the handshake merges transport and TLS setup, often needing zero extra round trips on a repeat visit.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">See it happen: loading 6 assets under each version</h3>
+    <p style="margin-top: 0;">Pick a protocol version, then try the packet-loss toggle to see <em>why</em> HTTP/2's shared connection is also its weakness, and why HTTP/3 fixes it differently than HTTP/1.1 did.</p>
+
+    <div class="proto-tabs" id="protoTabs">
+      <button class="proto-tab active" data-proto="http1">HTTP/1.1</button>
+      <button class="proto-tab" data-proto="http2">HTTP/2</button>
+      <button class="proto-tab" data-proto="http3">HTTP/3</button>
+    </div>
+    <label class="proto-loss-toggle">
+      <input type="checkbox" id="lossToggle"> Simulate packet loss on stream 3
+    </label>
+
+    <div class="timeline-setup" id="timelineSetup"></div>
+    <div id="timelineRows"></div>
+
+    <div class="timeline-legend">
+      <span><span class="timeline-swatch" style="background: var(--text-muted); opacity: 0.5;"></span> Connection setup</span>
+      <span><span class="timeline-swatch" style="background: var(--accent);"></span> Transferring</span>
+      <span><span class="timeline-swatch" style="background: var(--danger);"></span> Blocked</span>
+    </div>
+    <div class="panel timeline-note" id="timelineNote"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Anatomy of an HTTP request &amp; response</h3>
+    <div class="http-block">GET /articles/networking HTTP/1.1
+Host: example.com
+User-Agent: Mozilla/5.0
+Accept: text/html
+Accept-Encoding: gzip, br
+Connection: keep-alive
+</div>
+    <p style="font-size: 0.85rem; color: var(--text-muted);">The <strong>request line</strong> (method, path, version), then <strong>headers</strong> (one per line, <code>Name: value</code>), then a blank line, then an optional body (empty for a GET).</p>
+
+    <div class="http-block">HTTP/1.1 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 4096
+Cache-Control: max-age=3600
+Set-Cookie: session=abc123; HttpOnly
+
+&lt;html&gt;...&lt;/html&gt;</div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">The <strong>status line</strong> (version, status code, reason phrase), then headers, then the body — here, the actual HTML.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Status code reference</h3>
+    <table>
+      <thead><tr><th>Code</th><th>Meaning</th><th>Category</th></tr></thead>
+      <tbody>
+        <tr class="status-row"><td>101</td><td>Switching Protocols — used by the WebSocket upgrade below</td><td><span class="badge badge-accent">1xx Informational</span></td></tr>
+        <tr class="status-row"><td>200</td><td>OK — the standard success response</td><td><span class="badge badge-ok">2xx Success</span></td></tr>
+        <tr class="status-row"><td>201</td><td>Created — a new resource was created (common after POST)</td><td><span class="badge badge-ok">2xx Success</span></td></tr>
+        <tr class="status-row"><td>301</td><td>Moved Permanently — update your bookmarks/links</td><td><span class="badge">3xx Redirection</span></td></tr>
+        <tr class="status-row"><td>304</td><td>Not Modified — your cached copy is still good, no body sent</td><td><span class="badge">3xx Redirection</span></td></tr>
+        <tr class="status-row"><td>400</td><td>Bad Request — the client sent something malformed</td><td><span class="badge badge-warn">4xx Client Error</span></td></tr>
+        <tr class="status-row"><td>401</td><td>Unauthorized — you need to authenticate first</td><td><span class="badge badge-warn">4xx Client Error</span></td></tr>
+        <tr class="status-row"><td>403</td><td>Forbidden — you're authenticated, but not allowed</td><td><span class="badge badge-warn">4xx Client Error</span></td></tr>
+        <tr class="status-row"><td>404</td><td>Not Found</td><td><span class="badge badge-warn">4xx Client Error</span></td></tr>
+        <tr class="status-row"><td>429</td><td>Too Many Requests — rate limited</td><td><span class="badge badge-warn">4xx Client Error</span></td></tr>
+        <tr class="status-row"><td>500</td><td>Internal Server Error — the server broke, not your fault</td><td><span class="badge badge-danger">5xx Server Error</span></td></tr>
+        <tr class="status-row"><td>503</td><td>Service Unavailable — server is overloaded or down for maintenance</td><td><span class="badge badge-danger">5xx Server Error</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">WebSocket: escaping request/response</h3>
+    <p style="margin-top: 0;">Plain HTTP can't have the server speak first — it can only reply to a request. That's fine for pages, but useless for a chat app where the server needs to push a message the instant it arrives. WebSocket solves this by <em>upgrading</em> a single HTTP connection into a persistent, full-duplex pipe.</p>
+
+    <div class="panel step-text" id="wsStepText"></div>
+    <div class="ws-log" id="wsLog"></div>
+
+    <div class="controls">
+      <button class="btn" id="wsResetBtn">⟲ Reset</button>
+      <button class="btn" id="wsPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="wsNextBtn">Next ▶</button>
+      <span class="step-counter" id="wsStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">gRPC: RPC over HTTP/2</h3>
+    <p style="margin-top: 0;"><span class="term" data-tip="Remote Procedure Call -- calling a function that actually runs on another machine, made to look like an ordinary local function call in your code.">gRPC</span> lets services call each other like local functions, serializing arguments with <span class="term" data-tip="A compact binary serialization format (unlike JSON's text-based format) -- smaller and faster to parse, at the cost of not being human-readable without the .proto schema.">Protocol Buffers</span> and riding on HTTP/2's multiplexed streams. Because it's built on real streams rather than one-shot request/response, it supports four calling patterns:</p>
+
+    <div class="grpc-grid">
+      <div class="grpc-card">
+        <h4>Unary</h4>
+        <div class="grpc-diagram">client ──req──▶ server<br>client ◀──res── server</div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0;">One request, one response — like a normal function call.</p>
+      </div>
+      <div class="grpc-card">
+        <h4>Server streaming</h4>
+        <div class="grpc-diagram">client ──req──▶ server<br>client ◀──res── server<br>client ◀──res── server<br>client ◀──res── server</div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0;">One request, a stream of responses — e.g. subscribing to price updates.</p>
+      </div>
+      <div class="grpc-card">
+        <h4>Client streaming</h4>
+        <div class="grpc-diagram">client ──req──▶ server<br>client ──req──▶ server<br>client ──req──▶ server<br>client ◀──res── server</div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0;">A stream of requests, one final response — e.g. uploading chunks of a file.</p>
+      </div>
+      <div class="grpc-card">
+        <h4>Bidirectional streaming</h4>
+        <div class="grpc-diagram">client ──req──▶ server<br>client ◀──res── server<br>client ──req──▶ server<br>client ◀──res── server</div>
+        <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0;">Both sides stream independently and simultaneously — e.g. a live voice-translation service.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>HTTP/2 doesn't fix everything.</strong> It fixes the "too many connections" problem, but its one shared TCP connection means a single lost packet can stall every in-flight request — exactly what HTTP/3 was built to fix.</li>
+      <li style="margin-bottom: 6px;"><strong>A WebSocket connection still starts as an HTTP request.</strong> It only becomes a raw bidirectional pipe after the server replies <code>101 Switching Protocols</code> — a WebSocket server that's down looks like an HTTP server that's down.</li>
+      <li style="margin-bottom: 6px;"><strong>Idempotency isn't automatic.</strong> GET, PUT, and DELETE are meant to be <span class="term" data-tip="An operation that produces the same end result no matter how many times you repeat it. Calling DELETE on the same resource twice should leave things exactly as they'd be after calling it once.">idempotent</span> (safe to retry), but POST usually isn't — retrying a failed POST can create a duplicate order, charge, or comment if the server isn't built to guard against it.</li>
+      <li><strong>gRPC isn't a drop-in replacement for REST APIs consumed by browsers.</strong> Browsers can't easily read raw HTTP/2 trailers the way gRPC needs, so browser clients typically go through gRPC-Web, a translating proxy layer.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="l4-tcp-udp.html">← Previous: L4 TCP vs UDP</a>
+    <a href="container-networking.html">Next: Container Networking →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Protocol timeline demo ----------------
+  var assets = ["style.css", "app.js", "hero.jpg", "logo.png", "font.woff2", "analytics.js"];
+  var protoTabs = document.getElementById("protoTabs");
+  var lossToggle = document.getElementById("lossToggle");
+  var timelineSetup = document.getElementById("timelineSetup");
+  var timelineRows = document.getElementById("timelineRows");
+  var timelineNote = document.getElementById("timelineNote");
+
+  var currentProto = "http1";
+
+  var protoInfo = {
+    http1: { setupWidth: 22, perStreamSetup: true, label: "Each of the 6 requests opens its own TCP + TLS connection (~22% of the timeline each, just for setup) before transferring anything." },
+    http2: { setupWidth: 10, perStreamSetup: false, label: "One shared TCP + TLS setup (~10% of the timeline), then all 6 streams multiplex over that single connection." },
+    http3: { setupWidth: 4, perStreamSetup: false, label: "One QUIC setup that merges transport and TLS (~4% of the timeline, often 0-RTT on a repeat visit), then all 6 streams run independently." }
+  };
+
+  function renderTimeline() {
+    var info = protoInfo[currentProto];
+    var lossOn = lossToggle.checked;
+
+    if (!info.perStreamSetup) {
+      timelineSetup.textContent = "Shared connection setup: " + info.setupWidth + "% of the timeline, once.";
+    } else {
+      timelineSetup.textContent = "No shared setup — every row below pays its own connection-setup cost.";
+    }
+
+    timelineRows.innerHTML = "";
+    assets.forEach(function (name, i) {
+      var streamIndex = i + 1;
+      var row = document.createElement("div");
+      row.className = "timeline-row";
+
+      var label = document.createElement("div");
+      label.className = "timeline-label";
+      label.textContent = name;
+      row.appendChild(label);
+
+      var track = document.createElement("div");
+      track.className = "timeline-track";
+
+      var segments = [];
+      var setupW = info.perStreamSetup ? info.setupWidth : 0;
+      if (setupW > 0) segments.push({ cls: "setup", left: 0, width: setupW });
+
+      var transferStart = setupW;
+      var isBlockedStream = lossOn && streamIndex === 3;
+      var isSharedConnection = !info.perStreamSetup;
+
+      if (lossOn && isSharedConnection) {
+        // HTTP/2: shared TCP connection -- loss on any stream stalls every stream.
+        segments.push({ cls: "active", left: transferStart, width: 25 });
+        segments.push({ cls: "blocked", left: transferStart + 25, width: 100 - transferStart - 25 });
+      } else if (isBlockedStream) {
+        // HTTP/1.1 or HTTP/3: loss only stalls this one independent stream.
+        segments.push({ cls: "active", left: transferStart, width: 25 });
+        segments.push({ cls: "blocked", left: transferStart + 25, width: 100 - transferStart - 25 });
+      } else {
+        segments.push({ cls: "active", left: transferStart, width: 100 - transferStart });
+      }
+
+      segments.forEach(function (seg) {
+        var el = document.createElement("div");
+        el.className = "timeline-seg " + seg.cls;
+        el.style.left = seg.left + "%";
+        el.style.width = seg.width + "%";
+        track.appendChild(el);
+      });
+
+      row.appendChild(track);
+      timelineRows.appendChild(row);
+    });
+
+    if (!lossOn) {
+      timelineNote.textContent = info.label;
+    } else if (currentProto === "http2") {
+      timelineNote.textContent = "Packet loss on stream 3's data stalls the whole shared TCP connection — every other stream freezes too, even though the loss had nothing to do with them. This is HTTP/2's TCP-level head-of-line blocking.";
+    } else if (currentProto === "http3") {
+      timelineNote.textContent = "Packet loss on stream 3 only stalls stream 3 — QUIC gives each stream its own independent reliability, so the other 5 keep going without waiting.";
+    } else {
+      timelineNote.textContent = "Packet loss on stream 3 only stalls stream 3 — it was already its own separate TCP connection, so the others were never affected in the first place. (HTTP/1.1's real cost is the setup overhead repeated 6 times, not loss propagation.)";
+    }
+  }
+
+  protoTabs.addEventListener("click", function (e) {
+    var btn = e.target.closest(".proto-tab");
+    if (!btn) return;
+    Array.prototype.forEach.call(protoTabs.children, function (b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    currentProto = btn.dataset.proto;
+    renderTimeline();
+  });
+  lossToggle.addEventListener("change", renderTimeline);
+  renderTimeline();
+
+  // ---------------- WebSocket demo ----------------
+  var wsSteps = [
+    { who: null, text: 'Client sends a normal-looking HTTP request, but asks to switch protocols: GET /chat HTTP/1.1 with header "Upgrade: websocket".' },
+    { who: "server", bubble: "HTTP/1.1 101 Switching Protocols", text: "Server agrees. From this exact point on, this TCP connection is no longer plain HTTP — it's a raw, persistent, full-duplex pipe." },
+    { who: "client", bubble: "{\"type\":\"join\",\"room\":\"general\"}", text: "Client sends its first WebSocket message — no new request/response cycle, just a frame on the open connection." },
+    { who: "server", bubble: "{\"type\":\"notice\",\"msg\":\"new user joined\"}", text: "Server pushes a message the client never asked for — impossible in plain HTTP, where the server can only ever reply." },
+    { who: "server", bubble: "{\"type\":\"chat\",\"from\":\"ana\",\"msg\":\"hey!\"}", text: "Server pushes again immediately, unprompted — this is the whole point of WebSocket: either side can send, at any time." },
+    { who: "client", bubble: "{\"type\":\"chat\",\"msg\":\"hello!\"}", text: "Client replies. Both sides keep sending frames back and forth for as long as the connection stays open — no handshake repeats." }
+  ];
+
+  var wsStepText = document.getElementById("wsStepText");
+  var wsLog = document.getElementById("wsLog");
+  var wsStepCounter = document.getElementById("wsStepCounter");
+  var wsPrevBtn = document.getElementById("wsPrevBtn");
+  var wsNextBtn = document.getElementById("wsNextBtn");
+  var wsResetBtn = document.getElementById("wsResetBtn");
+  var wsStepIndex = 0;
+
+  function renderWs() {
+    wsLog.innerHTML = "";
+    for (var i = 0; i <= wsStepIndex; i++) {
+      var step = wsSteps[i];
+      if (!step.who) continue;
+      var msg = document.createElement("div");
+      msg.className = "ws-msg " + step.who;
+      var bubble = document.createElement("div");
+      bubble.className = "ws-bubble";
+      bubble.textContent = step.bubble;
+      msg.appendChild(bubble);
+      wsLog.appendChild(msg);
+    }
+    wsStepText.textContent = wsSteps[wsStepIndex].text;
+    wsStepCounter.textContent = "Step " + (wsStepIndex + 1) + " / " + wsSteps.length;
+    wsPrevBtn.disabled = wsStepIndex === 0;
+    wsNextBtn.disabled = wsStepIndex === wsSteps.length - 1;
+  }
+
+  wsPrevBtn.addEventListener("click", function () { if (wsStepIndex > 0) { wsStepIndex--; renderWs(); } });
+  wsNextBtn.addEventListener("click", function () { if (wsStepIndex < wsSteps.length - 1) { wsStepIndex++; renderWs(); } });
+  wsResetBtn.addEventListener("click", function () { wsStepIndex = 0; renderWs(); });
+  renderWs();
+})();
+</script>
+</body>
+</html>

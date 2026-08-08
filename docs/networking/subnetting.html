@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Subnetting &amp; IP Addressing — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .calc-row {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+    align-items: flex-end;
+  }
+  .field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .field label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  .field input[type="text"] { width: 200px; }
+  .prefix-field { flex: 1; min-width: 220px; }
+  .prefix-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .prefix-row input[type="range"] { flex: 1; }
+  .prefix-value {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-weight: 700;
+    min-width: 44px;
+    text-align: center;
+  }
+  .presets { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .presets .btn { padding: 5px 10px; font-size: 0.78rem; font-weight: 600; }
+
+  .error-box {
+    display: none;
+    color: var(--danger);
+    font-size: 0.88rem;
+    margin-top: 10px;
+  }
+  .error-box.show { display: block; }
+
+  .bit-strip {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    margin: 18px 0 10px;
+  }
+  .octet-group {
+    display: flex;
+    gap: 2px;
+  }
+  .bit {
+    width: 18px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.7rem;
+    border-radius: 3px;
+    color: #fff;
+  }
+  .bit.net { background: var(--accent); }
+  .bit.host { background: var(--accent-2); }
+  .bit-legend {
+    display: flex;
+    gap: 18px;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+  }
+  .bit-legend span { display: flex; align-items: center; gap: 6px; }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+
+  .results-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .result-item {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: var(--bg-elevated);
+  }
+  .result-item .label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+  .result-item .value {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 1.02rem;
+  }
+  .result-item .value.small { font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 2 of 5</span>
+    <h1>Subnetting &amp; IP Addressing</h1>
+    <p>Enter an IPv4 address and a <span class="term" data-tip="Classless Inter-Domain Routing notation -- writes a subnet as address/prefix-length, e.g. 192.168.1.0/24, replacing the older classful A/B/C system.">CIDR</span> prefix to see exactly how the <span class="term" data-tip="A 32-bit pattern of contiguous 1s followed by 0s that marks which bits of an address are the fixed network portion vs. the variable host portion, e.g. 255.255.255.0.">subnet mask</span> splits it into a network portion and a host portion — updated live as you type or drag.</p>
+    <p>Subnetting matters because it lets one large address block be broken into smaller, independently routable pieces. A company with a /16 allocation (65,536 addresses) can hand a /24 (256 addresses) to each office instead of wasting the whole block on a single location.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Why subnet at all?</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Smaller broadcast domains</strong> — every device in a subnet hears every <span class="term" data-tip="A frame or packet delivered to every device on a network segment at once, e.g. ARP requests. Broadcasts don't cross router boundaries, which is exactly why subnetting limits their blast radius.">broadcast</span>; splitting a /16 into /24s means noisy traffic in one office doesn't flood every office.</li>
+      <li style="margin-bottom: 6px;"><strong>Route summarization</strong> — a router can advertise one summarized route for an entire subnet instead of one route per host, keeping routing tables small.</li>
+      <li style="margin-bottom: 6px;"><strong>Security boundaries</strong> — subnets are a natural place to enforce firewall rules, e.g. between a public-facing subnet and an internal database subnet.</li>
+      <li><strong>Efficient allocation via <span class="term" data-tip="Variable Length Subnet Masking -- using different prefix lengths for different subnets carved out of the same block, so a 2-host point-to-point link and a 200-host office each get an appropriately sized slice instead of the same fixed size.">VLSM</span></strong> — give each subnet only as many addresses as it actually needs.</li>
+    </ul>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <div class="calc-row">
+      <div class="field">
+        <label for="ipInput">IP address</label>
+        <input type="text" id="ipInput" value="192.168.1.10" inputmode="numeric" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="field prefix-field">
+        <label for="prefixRange">CIDR prefix</label>
+        <div class="prefix-row">
+          <span class="mono">/</span>
+          <input type="range" id="prefixRange" min="0" max="32" value="24">
+          <span class="prefix-value" id="prefixValue">24</span>
+        </div>
+      </div>
+    </div>
+    <div class="presets">
+      <button class="btn" data-prefix="8">/8</button>
+      <button class="btn" data-prefix="16">/16</button>
+      <button class="btn" data-prefix="24">/24</button>
+      <button class="btn" data-prefix="26">/26</button>
+      <button class="btn" data-prefix="28">/28</button>
+      <button class="btn" data-prefix="30">/30</button>
+      <button class="btn" data-prefix="31">/31 (point-to-point)</button>
+      <button class="btn" data-prefix="32">/32 (single host)</button>
+    </div>
+    <div class="error-box" id="errorBox"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Network bits vs. host bits</h3>
+    <div class="bit-strip" id="bitStrip"></div>
+    <div class="bit-legend">
+      <span><span class="swatch" style="background: var(--accent);"></span> Network bits (fixed for every device on this subnet)</span>
+      <span><span class="swatch" style="background: var(--accent-2);"></span> Host bits (unique per device)</span>
+    </div>
+
+    <div class="results-grid" id="resultsGrid"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Private &amp; reserved IPv4 ranges</h3>
+    <p style="color: var(--text-muted); margin-top: -6px;">Defined by <span class="term" data-tip="Request for Comments 1918 -- the IETF standard that reserves three address blocks for private networks, which are never routed on the public Internet.">RFC 1918</span> and others. You'll run into these constantly in the calculator above.</p>
+    <table>
+      <thead><tr><th>Range</th><th>CIDR</th><th>Typical use</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">10.0.0.0 – 10.255.255.255</td><td class="mono">10.0.0.0/8</td><td>Large private networks (common in enterprises and clouds)</td></tr>
+        <tr><td class="mono">172.16.0.0 – 172.31.255.255</td><td class="mono">172.16.0.0/12</td><td>Private networks (Docker's default bridge network)</td></tr>
+        <tr><td class="mono">192.168.0.0 – 192.168.255.255</td><td class="mono">192.168.0.0/16</td><td>Private networks (most home routers)</td></tr>
+        <tr><td class="mono">127.0.0.0 – 127.255.255.255</td><td class="mono">127.0.0.0/8</td><td><span class="term" data-tip="An address that always refers back to the same host -- used for testing network software without touching a real network.">Loopback</span> (127.0.0.1 = localhost)</td></tr>
+        <tr><td class="mono">169.254.0.0 – 169.254.255.255</td><td class="mono">169.254.0.0/16</td><td><span class="term" data-tip="Automatic Private IP Addressing -- a host assigns itself one of these addresses when it expects DHCP but gets no response, so it can still reach other self-assigned hosts on the same link.">Link-local</span> (APIPA), self-assigned when DHCP fails</td></tr>
+        <tr><td class="mono">224.0.0.0 – 239.255.255.255</td><td class="mono">224.0.0.0/4</td><td>Multicast (one-to-many delivery)</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>The network and broadcast addresses aren't usable hosts.</strong> That's why usable hosts = total addresses − 2 for anything /30 or larger.</li>
+      <li style="margin-bottom: 6px;"><strong>/31 and /32 are special-cased by design.</strong> <span class="term" data-tip="RFC 3021 -- allows a /31 (only 2 addresses, which would normally be all network+broadcast with nothing left over) to be used as a point-to-point link between exactly two devices, wasting no address on a broadcast.">RFC 3021</span> lets a /31 use both of its addresses as real hosts on point-to-point links (e.g. router-to-router), and a /32 identifies a single host route with no subnet at all.</li>
+      <li style="margin-bottom: 6px;"><strong>Classful addressing (Class A/B/C) is legacy.</strong> It hasn't determined real-world subnet sizes since the early 1990s — everything today is classless (CIDR), but the "Class" badge above is still useful shorthand for how big a block originally was.</li>
+      <li><strong>A bigger prefix number means a smaller subnet.</strong> This trips up almost everyone at first: /24 (256 addresses) is much bigger than /30 (4 addresses) — the prefix counts fixed network bits, not host capacity.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="osi-layers.html">← Previous: OSI / TCP-IP Layers</a>
+    <a href="tcp-handshake.html">Next: TCP Handshake →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var ipInput = document.getElementById("ipInput");
+  var prefixRange = document.getElementById("prefixRange");
+  var prefixValue = document.getElementById("prefixValue");
+  var errorBox = document.getElementById("errorBox");
+  var bitStrip = document.getElementById("bitStrip");
+  var resultsGrid = document.getElementById("resultsGrid");
+
+  function parseIp(str) {
+    var parts = str.trim().split(".");
+    if (parts.length !== 4) return null;
+    var octets = [];
+    for (var i = 0; i < 4; i++) {
+      if (!/^\d{1,3}$/.test(parts[i])) return null;
+      var n = parseInt(parts[i], 10);
+      if (n < 0 || n > 255) return null;
+      octets.push(n);
+    }
+    return octets;
+  }
+
+  function octetsToInt(octets) {
+    return ((octets[0] << 24) | (octets[1] << 16) | (octets[2] << 8) | octets[3]) >>> 0;
+  }
+
+  function intToOctets(n) {
+    return [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  }
+
+  function intToDotted(n) {
+    return intToOctets(n).join(".");
+  }
+
+  function toBinaryString(n) {
+    var s = (n >>> 0).toString(2);
+    while (s.length < 32) s = "0" + s;
+    return s;
+  }
+
+  function ipClass(firstOctet) {
+    if (firstOctet < 128) return "A";
+    if (firstOctet < 192) return "B";
+    if (firstOctet < 224) return "C";
+    if (firstOctet < 240) return "D (multicast)";
+    return "E (reserved)";
+  }
+
+  function maskFromPrefix(prefix) {
+    if (prefix === 0) return 0;
+    return (0xFFFFFFFF << (32 - prefix)) >>> 0;
+  }
+
+  function renderBitStrip(ipInt, prefix) {
+    var bin = toBinaryString(ipInt);
+    bitStrip.innerHTML = "";
+    for (var octet = 0; octet < 4; octet++) {
+      var group = document.createElement("div");
+      group.className = "octet-group";
+      for (var b = 0; b < 8; b++) {
+        var bitIndex = octet * 8 + b;
+        var bitEl = document.createElement("div");
+        bitEl.className = "bit " + (bitIndex < prefix ? "net" : "host");
+        bitEl.textContent = bin[bitIndex];
+        group.appendChild(bitEl);
+      }
+      bitStrip.appendChild(group);
+    }
+  }
+
+  function resultItem(label, value, small, tip) {
+    var div = document.createElement("div");
+    div.className = "result-item";
+    var labelHtml = tip
+      ? '<span class="term" data-tip="' + tip.replace(/"/g, "&quot;") + '">' + label + "</span>"
+      : label;
+    div.innerHTML = '<div class="label">' + labelHtml + '</div><div class="value' + (small ? " small" : "") + '">' + value + "</div>";
+    return div;
+  }
+
+  function update() {
+    var prefix = parseInt(prefixRange.value, 10);
+    prefixValue.textContent = prefix;
+
+    var octets = parseIp(ipInput.value);
+    if (!octets) {
+      errorBox.textContent = "Enter a valid IPv4 address, e.g. 192.168.1.10";
+      errorBox.classList.add("show");
+      bitStrip.innerHTML = "";
+      resultsGrid.innerHTML = "";
+      return;
+    }
+    errorBox.classList.remove("show");
+
+    var ipInt = octetsToInt(octets);
+    var maskInt = maskFromPrefix(prefix);
+    var wildcardInt = (~maskInt) >>> 0;
+    var networkInt = (ipInt & maskInt) >>> 0;
+    var broadcastInt = (networkInt | wildcardInt) >>> 0;
+
+    var totalAddresses = Math.pow(2, 32 - prefix);
+    var usableHosts, firstUsable, lastUsable;
+    if (prefix === 32) {
+      usableHosts = 1;
+      firstUsable = networkInt;
+      lastUsable = networkInt;
+    } else if (prefix === 31) {
+      usableHosts = 2;
+      firstUsable = networkInt;
+      lastUsable = broadcastInt;
+    } else {
+      usableHosts = totalAddresses - 2;
+      firstUsable = networkInt + 1;
+      lastUsable = broadcastInt - 1;
+    }
+
+    renderBitStrip(ipInt, prefix);
+
+    resultsGrid.innerHTML = "";
+    resultsGrid.appendChild(resultItem("CIDR notation", octets.join(".") + "/" + prefix, false,
+      "Address/prefix-length shorthand for an address plus its subnet mask -- /" + prefix + " means the first " + prefix + " bits are the fixed network portion."));
+    resultsGrid.appendChild(resultItem("Subnet mask (dotted)", intToDotted(maskInt)));
+    resultsGrid.appendChild(resultItem("Subnet mask (binary)", toBinaryString(maskInt).match(/.{8}/g).join("."), true));
+    resultsGrid.appendChild(resultItem("Wildcard mask", intToDotted(wildcardInt), false,
+      "The bitwise inverse of the subnet mask. Used by router/firewall access-control lists (e.g. Cisco ACLs), which specify which bits to ignore rather than which to match."));
+    resultsGrid.appendChild(resultItem("Network address", intToDotted(networkInt), false,
+      "The all-host-bits-zero address that identifies the subnet itself. It can't be assigned to a device."));
+    resultsGrid.appendChild(resultItem("Broadcast address", intToDotted(broadcastInt), false,
+      "The all-host-bits-one address. Packets sent here are delivered to every host in the subnet, and it can't be assigned to a single device."));
+    resultsGrid.appendChild(resultItem("Usable host range", prefix >= 31 ? intToDotted(firstUsable) + (prefix === 31 ? " – " + intToDotted(lastUsable) : "") : intToDotted(firstUsable) + " – " + intToDotted(lastUsable), true));
+    resultsGrid.appendChild(resultItem("Total addresses", totalAddresses.toLocaleString(), false,
+      "2^(32 - prefix): the size of the whole address block, including the network and broadcast addresses."));
+    resultsGrid.appendChild(resultItem("Usable hosts", usableHosts.toLocaleString(), false,
+      "Total addresses minus the network and broadcast addresses (except on /31 and /32, which are special-cased)."));
+    resultsGrid.appendChild(resultItem("Classful designation", "Class " + ipClass(octets[0]), false,
+      "A legacy pre-1993 system (Class A/B/C/D/E) that fixed subnet sizes based on the first octet's value. Replaced by CIDR, but still used informally to describe a block's original size."));
+  }
+
+  ipInput.addEventListener("input", update);
+  prefixRange.addEventListener("input", update);
+
+  Array.prototype.forEach.call(document.querySelectorAll(".presets .btn"), function (btn) {
+    btn.addEventListener("click", function () {
+      prefixRange.value = btn.dataset.prefix;
+      update();
+    });
+  });
+
+  update();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OSI / TCP-IP Layers — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .layer-explorer {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 20px;
+  }
+  @media (max-width: 640px) {
+    .layer-explorer { grid-template-columns: 1fr; }
+  }
+  .layer-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .layer-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    text-align: left;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .layer-btn:hover { border-color: var(--accent); }
+  .layer-btn.selected {
+    background: var(--accent);
+    color: var(--accent-ink);
+    border-color: var(--accent);
+  }
+  .layer-btn .num {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-weight: 700;
+    opacity: 0.7;
+    font-size: 0.8rem;
+  }
+  .detail-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 0;
+  }
+  .detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+    margin: 16px 0;
+  }
+  .detail-item .label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+  }
+
+  /* Encapsulation demo */
+  .demo-stacks {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    margin: 20px 0;
+  }
+  @media (max-width: 640px) {
+    .demo-stacks { grid-template-columns: 1fr; }
+  }
+  .demo-stack-title {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+  .demo-layer {
+    padding: 8px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    font-size: 0.85rem;
+    margin-bottom: 5px;
+    display: flex;
+    justify-content: space-between;
+    transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+  }
+  .demo-layer .pdu { color: var(--text-muted); font-size: 0.78rem; }
+  .demo-layer.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-ink);
+  }
+  .demo-layer.active .pdu { color: var(--accent-ink); opacity: 0.85; }
+  .demo-layer.done {
+    opacity: 0.55;
+  }
+  .demo-layer.passthrough {
+    border-style: dashed;
+    opacity: 0.6;
+  }
+
+  .packet-row {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 0;
+    min-height: 54px;
+    margin: 18px 0;
+    flex-wrap: wrap;
+  }
+  .chip {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    padding: 10px 12px;
+    color: #fff;
+  }
+  .chip.eth { background: #7c3aed; }
+  .chip.ip { background: #d97706; }
+  .chip.tcp { background: #0d9488; }
+  .chip.data { background: #2563eb; padding: 10px 22px; }
+  .chip.fcs { background: #7c3aed; }
+
+  .wire-label {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    min-height: 1.2em;
+  }
+
+  .step-text {
+    min-height: 3em;
+  }
+
+  .step-counter {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-left: auto;
+  }
+
+  .note {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-top: 8px;
+  }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 1 of 5</span>
+    <h1>OSI / TCP-IP Layers</h1>
+    <p>Networking is organized into layers so each piece of software only has to worry about its own job: the code that renders a web page never has to know how bits move across a fiber-optic cable, and the code pushing those bits never has to know what a URL is. Each layer only talks to the layer directly above and below it, through a well-defined interface — and has no idea what happens further up or down the stack.</p>
+    <p>Two numbering schemes are common: the theoretical <span class="term" data-tip="Defined in 1984 by ISO. Rarely implemented exactly as specified, but its 7-layer vocabulary (L1-L7) is still how engineers talk about where a problem lives.">7-layer OSI model</span> and the practical <span class="term" data-tip="Defined by the IETF alongside the protocols themselves. This is the model the actual Internet runs on -- it collapses OSI's top three layers into one Application layer.">4-layer TCP/IP model</span>. Below, explore what each of the 7 OSI layers does, then watch a message get wrapped in headers as it travels down one stack and unwrapped as it climbs back up the other.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Why split networking into layers?</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Interoperability</strong> — a Linux server and a Windows laptop can talk to each other because both implement the same layer interfaces, even though almost everything above and below those interfaces differs.</li>
+      <li style="margin-bottom: 6px;"><strong>Swappability</strong> — you can switch your laptop from Wi-Fi to a wired Ethernet connection mid-session without changing a single line of browser code, because only <span class="term" data-tip="OSI Layer 1 (Physical) and Layer 2 (Data Link) — the layers responsible for getting bits onto a specific medium (radio, copper, fiber) and addressing devices on that local link.">L1/L2</span> changed.</li>
+      <li style="margin-bottom: 6px;"><strong>Independent evolution</strong> — HTTP went from version 1.1 to 2 to 3 without any change to how IP routes packets underneath it.</li>
+      <li><strong>A shared troubleshooting vocabulary</strong> — saying "it's a Layer 3 problem" instantly tells another engineer to look at routing and IP addressing, not cabling or application code.</li>
+    </ul>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3>Explore the layers</h3>
+    <div class="layer-explorer">
+      <div class="layer-list" id="layerList"></div>
+      <div class="detail-panel" id="layerDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3>Watch encapsulation happen</h3>
+    <p style="color: var(--text-muted); margin-top: -6px;">Step through what happens when your browser sends a request: the data picks up a header at each layer on the way out, travels across the wire, then gets unwrapped one layer at a time on the other end.</p>
+
+    <div class="demo-stacks">
+      <div>
+        <div class="demo-stack-title">Sender</div>
+        <div id="senderStack"></div>
+      </div>
+      <div>
+        <div class="demo-stack-title">Receiver</div>
+        <div id="receiverStack"></div>
+      </div>
+    </div>
+
+    <div class="wire-label" id="wireLabel"></div>
+    <div class="packet-row" id="packetRow"></div>
+
+    <div class="panel step-text" id="stepText"></div>
+
+    <div class="controls">
+      <button class="btn" id="resetBtn">⟲ Reset</button>
+      <button class="btn" id="prevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="nextBtn">Next ▶</button>
+      <span class="step-counter" id="stepCounter"></span>
+    </div>
+    <p class="note">Presentation and Session (L5–L6) don't add their own header in this simplified view — they hand data straight to Transport. Also, in reality, if the finished frame is bigger than the link's <span class="term" data-tip="Maximum Transmission Unit -- the largest frame size a link allows, e.g. 1500 bytes on typical Ethernet. If the data is bigger, the Network layer has to split it into multiple smaller packets first.">MTU</span>, it has to be split into multiple packets before it can be sent — a process called fragmentation.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">OSI vs. TCP/IP: two models, one idea</h3>
+    <p style="color: var(--text-muted); margin-top: -6px;">The Internet was actually built on the 4-layer TCP/IP model. The 7-layer OSI model came from a separate, mostly unimplemented standardization effort — but its terminology stuck because it's more granular and easier to teach layer-by-layer.</p>
+    <table>
+      <thead><tr><th>OSI (7 layers)</th><th>TCP/IP (4 layers)</th></tr></thead>
+      <tbody>
+        <tr><td>7. Application</td><td rowspan="3">Application</td></tr>
+        <tr><td>6. Presentation</td></tr>
+        <tr><td>5. Session</td></tr>
+        <tr><td>4. Transport</td><td>Transport</td></tr>
+        <tr><td>3. Network</td><td>Internet</td></tr>
+        <tr><td>2. Data Link</td><td rowspan="2">Network Access</td></tr>
+        <tr><td>1. Physical</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>NAT breaks layering purity.</strong> <span class="term" data-tip="Network Address Translation -- lets many devices on a private network share one public IP address by rewriting source addresses and ports as packets leave the network.">NAT</span> devices rewrite Layer 3/4 information on the fly, which is why protocols that embed IP addresses inside their Layer 7 payload (like older FTP) can break behind NAT.</li>
+      <li style="margin-bottom: 6px;"><strong>Firewalls deliberately look inside layers they "shouldn't."</strong> A Layer 3/4 firewall can also peek into Layer 7 payloads to block specific applications — a intentional layer violation done for security.</li>
+      <li style="margin-bottom: 6px;"><strong>MTU mismatches cause silent slowdowns.</strong> If a packet is too big for a link and the <span class="term" data-tip="A flag in the IP header meaning do-not-fragment. If a router can't forward the packet without splitting it, it drops the packet instead and, ideally, sends back an ICMP error.">Don't Fragment</span> flag is set, routers drop the oversized packet instead of splitting it, leading to hard-to-diagnose connection hangs.</li>
+      <li><strong>Not every layer is meaningfully involved in every conversation.</strong> A ping between two hosts on the same switch barely touches Layer 3 routing logic — it's mostly a Layer 2 conversation.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <span></span>
+    <a href="subnetting.html">Next: Subnetting &amp; IP Addressing →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var layers = [
+    { n: 7, name: "Application", pdu: "Data", tcpip: "Application", protocols: "HTTP, DNS, SMTP, IMAP",
+      desc: "Where user-facing protocols live. Turns a user action -- loading a page, sending mail -- into a structured request or response that the rest of the stack can carry. This is the only layer most application developers write code against directly, usually through a <span class=\"term\" data-tip=\"An operating-system API that lets a program send and receive data over a network without dealing with headers, routing, or wires directly -- you read and write to it much like a file.\">socket</span> or a high-level HTTP library." },
+    { n: 6, name: "Presentation", pdu: "Data", tcpip: "Application", protocols: "TLS, JPEG, character encoding",
+      desc: "Formats, encrypts, or compresses data so both ends agree on how it's represented, regardless of the underlying application. In practice this is mostly handled by <span class=\"term\" data-tip=\"Transport Layer Security -- encrypts and authenticates a connection. It's the 'S' in HTTPS, and technically it runs on top of TCP even though textbooks describe it as living at this layer.\">TLS</span> and standard encodings (UTF-8, JPEG), rather than a distinct piece of software most engineers think of as 'the presentation layer.'" },
+    { n: 5, name: "Session", pdu: "Data", tcpip: "Application", protocols: "Sockets API, RPC, NetBIOS",
+      desc: "Opens, manages, and tears down a logical conversation between two hosts, independent of the data being exchanged. On modern systems this is mostly folded into the <span class=\"term\" data-tip=\"The OS-level interface (e.g. Berkeley sockets) that TCP/IP networking is built on: connect(), send(), recv(), close().\">sockets API</span> and TLS session resumption, rather than a standalone protocol most engineers interact with directly." },
+    { n: 4, name: "Transport", pdu: "Segment / Datagram", tcpip: "Transport", protocols: "TCP, UDP",
+      desc: "Breaks data into segments, adds source/destination <span class=\"term\" data-tip=\"A 16-bit number (0-65535) identifying which application on a host a segment belongs to -- e.g. 443 for HTTPS, 22 for SSH. The IP address gets a packet to the right machine; the port gets it to the right program.\">port numbers</span>, and -- for <span class=\"term\" data-tip=\"Transmission Control Protocol -- connection-oriented, and guarantees ordered, reliable delivery via acknowledgments and retransmission. See the TCP Handshake page for the full mechanics.\">TCP</span> -- guarantees ordered, reliable delivery through acknowledgments, retransmission, and flow control. <span class=\"term\" data-tip=\"User Datagram Protocol -- connectionless, with no ordering or delivery guarantees and no handshake. Used where speed matters more than reliability: DNS queries, video calls, online games.\">UDP</span> skips all of that for speed." },
+    { n: 3, name: "Network", pdu: "Packet", tcpip: "Internet", protocols: "IP, ICMP, OSPF, BGP",
+      desc: "Adds logical addressing (<span class=\"term\" data-tip=\"A 32-bit (IPv4) or 128-bit (IPv6) number identifying a host on a network. Unlike a MAC address, it can change depending on which network you're connected to.\">IP addresses</span>) and figures out the path a packet should take across interconnected networks. Routers make per-packet forwarding decisions here using protocols like <span class=\"term\" data-tip=\"Border Gateway Protocol -- the routing protocol that decides how traffic flows between different organizations' networks across the Internet.\">BGP</span> and <span class=\"term\" data-tip=\"Open Shortest Path First -- a routing protocol used inside a single organization's network to find the shortest path between routers.\">OSPF</span>. <span class=\"term\" data-tip=\"Internet Control Message Protocol -- used for diagnostics and error reporting, not user data. The ping command works by sending ICMP Echo Request messages.\">ICMP</span> (used by ping and traceroute) also lives here." },
+    { n: 2, name: "Data Link", pdu: "Frame", tcpip: "Network Access", protocols: "Ethernet, Wi-Fi (802.11), ARP",
+      desc: "Adds physical (<span class=\"term\" data-tip=\"Media Access Control address -- a 48-bit identifier burned into a network interface, e.g. 3c:22:fb:1a:9e:04. Unlike an IP address, it doesn't change and is only meaningful on the local link.\">MAC</span>) addressing and packages packets into frames for delivery across a single local link. <span class=\"term\" data-tip=\"Address Resolution Protocol -- how a device on an Ethernet or Wi-Fi network discovers the MAC address that corresponds to a known IP address on the same subnet.\">ARP</span> is what maps an IP address to a MAC address before a frame can actually be sent." },
+    { n: 1, name: "Physical", pdu: "Bits", tcpip: "Network Access", protocols: "Cabling, radio, voltage levels",
+      desc: "Converts frames into raw bits transmitted as electrical signals, light pulses, or radio waves. This layer defines things like voltage levels, cable pinouts, and radio frequencies -- it has no concept of an address at all, just a stream of 1s and 0s across a shared medium." }
+  ];
+
+  var listEl = document.getElementById("layerList");
+  var detailEl = document.getElementById("layerDetail");
+
+  function renderDetail(layer) {
+    detailEl.innerHTML =
+      '<h3 class="detail-title"><span class="badge badge-accent">L' + layer.n + "</span> " + layer.name + "</h3>" +
+      '<div class="detail-grid">' +
+      '<div class="detail-item"><div class="label">PDU name</div><div>' + layer.pdu + "</div></div>" +
+      '<div class="detail-item"><div class="label">TCP/IP layer</div><div>' + layer.tcpip + "</div></div>" +
+      '<div class="detail-item"><div class="label">Example protocols</div><div>' + layer.protocols + "</div></div>" +
+      "</div>" +
+      "<p>" + layer.desc + "</p>";
+  }
+
+  layers.forEach(function (layer, idx) {
+    var btn = document.createElement("button");
+    btn.className = "layer-btn" + (idx === 0 ? " selected" : "");
+    btn.innerHTML = '<span class="num">L' + layer.n + "</span> " + layer.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(listEl.children, function (c) { c.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderDetail(layer);
+    });
+    listEl.appendChild(btn);
+  });
+  renderDetail(layers[0]);
+
+  // ---------------- Encapsulation demo ----------------
+  var steps = [
+    { side: "sender", layer: 7, chips: ["data"],
+      text: "Application creates the data — e.g. an HTTP request — and hands it down the stack." },
+    { side: "sender", layer: 4, chips: ["tcp", "data"],
+      text: "Transport wraps it in a TCP header (adds source/destination ports). It's now a segment." },
+    { side: "sender", layer: 3, chips: ["ip", "tcp", "data"],
+      text: "Network wraps it in an IP header (adds source/destination IP addresses). It's now a packet." },
+    { side: "sender", layer: 2, chips: ["eth", "ip", "tcp", "data", "fcs"],
+      text: "Data Link wraps it in an Ethernet header + trailer (adds source/destination MAC addresses). It's now a frame." },
+    { side: "wire", layer: 1, chips: ["eth", "ip", "tcp", "data", "fcs"],
+      text: "Physical converts the frame to raw bits and puts them on the wire (or over radio)." },
+    { side: "receiver", layer: 2, chips: ["ip", "tcp", "data"],
+      text: "Receiver's Data Link layer checks the destination MAC address, then strips the Ethernet header + trailer." },
+    { side: "receiver", layer: 3, chips: ["tcp", "data"],
+      text: "Network layer checks the destination IP address, then strips the IP header." },
+    { side: "receiver", layer: 4, chips: ["data"],
+      text: "Transport layer uses the port number to find the right application, then strips the TCP header." },
+    { side: "receiver", layer: 7, chips: ["data"],
+      text: "Application receives the original data — exactly what the sender's application created." }
+  ];
+
+  var senderOrder = [7, 4, 3, 2, 1];
+  var receiverOrder = [1, 2, 3, 4, 7];
+  var chipMeta = {
+    eth: { label: "ETH", cls: "eth" },
+    ip: { label: "IP", cls: "ip" },
+    tcp: { label: "TCP", cls: "tcp" },
+    data: { label: "DATA", cls: "data" },
+    fcs: { label: "FCS", cls: "fcs" }
+  };
+  var chipOrder = ["eth", "ip", "tcp", "data", "fcs"];
+
+  var senderStackEl = document.getElementById("senderStack");
+  var receiverStackEl = document.getElementById("receiverStack");
+  var packetRowEl = document.getElementById("packetRow");
+  var wireLabelEl = document.getElementById("wireLabel");
+  var stepTextEl = document.getElementById("stepText");
+  var stepCounterEl = document.getElementById("stepCounter");
+  var prevBtn = document.getElementById("prevBtn");
+  var nextBtn = document.getElementById("nextBtn");
+  var resetBtn = document.getElementById("resetBtn");
+
+  function buildStackRows(container) {
+    container.innerHTML = "";
+    layers.forEach(function (layer) {
+      var row = document.createElement("div");
+      row.className = "demo-layer";
+      row.dataset.n = layer.n;
+      row.innerHTML = "<span>L" + layer.n + " " + layer.name + "</span><span class=\"pdu\">" + layer.pdu + "</span>";
+      container.appendChild(row);
+    });
+  }
+  buildStackRows(senderStackEl);
+  buildStackRows(receiverStackEl);
+
+  var stepIndex = 0;
+
+  function statusFor(n, order, activeLayer, doneUpTo) {
+    if (n === 5 || n === 6) return "passthrough";
+    if (n === activeLayer) return "active";
+    var pos = order.indexOf(n);
+    if (pos > -1 && pos < doneUpTo) return "done";
+    return "";
+  }
+
+  function render() {
+    var step = steps[stepIndex];
+
+    var senderActive = step.side === "sender" ? step.layer : (step.side === "wire" ? 1 : null);
+    var receiverActive = step.side === "receiver" ? step.layer : (step.side === "wire" ? 1 : null);
+
+    var senderDoneUpTo = step.side === "sender" ? senderOrder.indexOf(step.layer) : senderOrder.length;
+    var receiverDoneUpTo;
+    if (step.side === "receiver") {
+      receiverDoneUpTo = receiverOrder.indexOf(step.layer);
+    } else if (step.side === "wire") {
+      receiverDoneUpTo = 0;
+    } else {
+      receiverDoneUpTo = -1;
+    }
+
+    Array.prototype.forEach.call(senderStackEl.children, function (row) {
+      var n = Number(row.dataset.n);
+      row.className = "demo-layer " + statusFor(n, senderOrder, senderActive, senderDoneUpTo);
+    });
+    Array.prototype.forEach.call(receiverStackEl.children, function (row) {
+      var n = Number(row.dataset.n);
+      var st = statusFor(n, receiverOrder, receiverActive, receiverDoneUpTo);
+      if (receiverDoneUpTo === -1 && st === "") st = "";
+      row.className = "demo-layer " + st;
+    });
+
+    packetRowEl.innerHTML = "";
+    chipOrder.forEach(function (key) {
+      if (step.chips.indexOf(key) === -1) return;
+      var meta = chipMeta[key];
+      var chip = document.createElement("span");
+      chip.className = "chip " + meta.cls;
+      chip.textContent = meta.label;
+      packetRowEl.appendChild(chip);
+    });
+
+    wireLabelEl.textContent = step.side === "wire" ? "— on the wire —" : (step.side === "sender" ? "sender is building the frame" : "receiver is unwrapping the frame");
+    stepTextEl.textContent = step.text;
+    stepCounterEl.textContent = "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex === 0;
+    nextBtn.disabled = stepIndex === steps.length - 1;
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > 0) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", function () { stepIndex = 0; render(); });
+
+  render();
+})();
+</script>
+</body>
+</html>

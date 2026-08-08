@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNS Resolution — Networking</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .domain-field {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 4px;
+  }
+  .domain-field label {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+  }
+  .domain-field input { width: 240px; }
+  .sim-note { font-size: 0.8rem; color: var(--text-muted); margin: 4px 0 0; }
+
+  .diagram { display: flex; flex-direction: column; gap: 20px; padding: 10px 4px; min-height: 40px; }
+
+  .hop-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .hop-node {
+    flex: 0 0 auto;
+    padding: 7px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    font-size: 0.85rem;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .hop-line {
+    flex: 1;
+    position: relative;
+    height: 2px;
+    background: var(--accent);
+    margin: 18px 4px 0;
+  }
+  .hop-line::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: -4px;
+    border-style: solid;
+    border-width: 5px 0 5px 9px;
+    border-color: transparent transparent transparent var(--accent);
+  }
+  .hop-line.response { background: var(--accent-2); }
+  .hop-line.response::after { border-color: transparent transparent transparent var(--accent-2); }
+  .hop-line .hop-kind-label {
+    position: absolute;
+    top: -22px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 0.72rem;
+    font-family: "SFMono-Regular", Consolas, monospace;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .hop-single {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+
+  .answer-box {
+    margin-top: 16px;
+    padding: 14px 16px;
+    border-radius: 8px;
+    border: 1px dashed var(--code-border);
+    background: var(--code-bg);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 0.95rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 4 of 5</span>
+    <h1>DNS Resolution</h1>
+    <p>The <span class="term" data-tip="Domain Name System -- the distributed, hierarchical directory that maps human-readable names like example.com to machine-usable IP addresses.">Domain Name System</span> is what lets you type a name instead of memorizing an IP address. Follow what actually happens between typing a domain name and your browser getting an address to connect to — hop by hop.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Recursive vs. iterative queries</h3>
+    <p style="margin-top: 0;">Your OS makes a <span class="term" data-tip="A query where the responder is expected to do all the work and return a final answer, even if that means going and asking other servers itself. If it can't resolve it, it returns an error rather than a partial answer.">recursive query</span> to its configured resolver: "give me the final answer or an error, I don't want to talk to anyone else." The resolver then does the legwork by making a series of <span class="term" data-tip="A query where the responder answers with only what it directly knows, or a referral to someone who might know more -- it never chases the answer down on the asker's behalf.">iterative queries</span> to root, TLD, and authoritative servers, each of which just says "I don't know, but ask them" until it reaches an authoritative answer.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <div class="domain-field">
+      <label for="domainInput">Domain to resolve</label>
+      <input type="text" id="domainInput" value="example.com" autocomplete="off" spellcheck="false">
+    </div>
+    <p class="sim-note">This is a simulated walkthrough of the resolution process, not a live lookup — the answer shown at the end is illustrative.</p>
+
+    <div class="diagram" id="diagram"></div>
+
+    <div class="panel step-text" id="stepText" style="margin-top: 6px;"></div>
+    <div class="answer-box" id="answerBox" style="display: none;"></div>
+
+    <div class="controls">
+      <button class="btn" id="resetBtn">⟲ Reset</button>
+      <button class="btn" id="prevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="nextBtn">Next ▶</button>
+      <span class="step-counter" id="stepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common DNS record types</h3>
+    <table>
+      <thead><tr><th>Type</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">A</td><td>Maps a name to an <span class="term" data-tip="Internet Protocol version 4 -- the classic 32-bit address format, e.g. 93.184.216.34.">IPv4</span> address. What this page's demo is simulating.</td></tr>
+        <tr><td class="mono">AAAA</td><td>Maps a name to an <span class="term" data-tip="Internet Protocol version 6 -- the newer 128-bit address format, written like 2606:2800:220:1:248:1893:25c8:1946, designed to fix IPv4's address exhaustion.">IPv6</span> address.</td></tr>
+        <tr><td class="mono">CNAME</td><td>"Canonical Name" — an alias pointing one name to another name, e.g. www.example.com → example.com, which is then looked up in turn.</td></tr>
+        <tr><td class="mono">MX</td><td>"Mail Exchange" — which mail server should receive email for this domain, with a priority for failover.</td></tr>
+        <tr><td class="mono">TXT</td><td>Arbitrary text, commonly used for domain-ownership verification and email anti-spoofing records like <span class="term" data-tip="Sender Policy Framework -- a TXT record listing which mail servers are allowed to send email claiming to be from this domain.">SPF</span>.</td></tr>
+        <tr><td class="mono">NS</td><td>"Name Server" — declares which servers are authoritative for this domain. This is exactly what the TLD referral hands back in the walkthrough above.</td></tr>
+        <tr><td class="mono">SOA</td><td>"Start of Authority" — metadata about the zone itself: the primary name server, an admin contact, and timers like the default TTL.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Low TTLs aren't free.</strong> A short <span class="term" data-tip="Time To Live -- how many seconds a resolver is allowed to cache an answer before it must ask again. Lower TTLs make changes propagate faster but increase query load and lookup latency.">TTL</span> makes DNS changes (like failing over to a new server) take effect faster, but it also means every resolver has to re-query more often — a tradeoff between agility and load.</li>
+      <li style="margin-bottom: 6px;"><strong>"Propagation delay" is really just caching.</strong> There's no global push of DNS updates — every resolver only refreshes its own cached copy once that record's TTL expires, which is why the same change can appear at different times to different users.</li>
+      <li style="margin-bottom: 6px;"><strong><span class="term" data-tip="A response meaning the queried domain does not exist at all -- distinct from a timeout or server error. Resolvers cache this negative result too, per a TTL set in the domain's SOA record.">NXDOMAIN</span> gets cached too.</strong> If you query a typo'd domain, resolvers remember "this doesn't exist" for a while, so fixing a real typo and re-querying immediately can still show the old failure until that negative cache expires.</li>
+      <li><strong>Plain DNS queries aren't encrypted by default.</strong> Anyone on the network path can see which domains you're resolving. <span class="term" data-tip="DNS over HTTPS and DNS over TLS -- newer standards that encrypt DNS queries so they can't be read or tampered with in transit, increasingly enabled by default in browsers and operating systems.">DoH/DoT</span> address this by encrypting the query itself.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="tcp-handshake.html">← Previous: TCP Handshake</a>
+    <a href="linux-networking.html">Next: Linux Networking →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var domainInput = document.getElementById("domainInput");
+  var diagram = document.getElementById("diagram");
+  var stepText = document.getElementById("stepText");
+  var stepCounter = document.getElementById("stepCounter");
+  var answerBox = document.getElementById("answerBox");
+  var prevBtn = document.getElementById("prevBtn");
+  var nextBtn = document.getElementById("nextBtn");
+  var resetBtn = document.getElementById("resetBtn");
+
+  var FAKE_IP = "93.184.216.34";
+  var stepIndex = -1;
+
+  function escapeHtml(str) {
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
+  function buildSteps(domain) {
+    var tld = domain.split(".").slice(-1)[0] || "com";
+    // from/to are rendered via innerHTML below, so anything derived from user
+    // input must be HTML-escaped here. text fields are rendered via textContent
+    // and use the raw values instead.
+    var safeTld = escapeHtml(tld);
+    return [
+      { type: "single", node: "Browser cache", result: "MISS",
+        text: 'Browser checks its own DNS cache for "' + domain + '" — not found.' },
+      { type: "single", node: "OS resolver cache / hosts file", result: "MISS",
+        text: "Operating system checks its resolver cache and hosts file — not found either." },
+      { type: "hop", from: "OS", to: "Recursive resolver", kind: "query",
+        text: 'OS sends the query to the configured recursive resolver (e.g. 8.8.8.8): "Where is ' + domain + '?"' },
+      { type: "single", node: "Recursive resolver cache", result: "MISS",
+        text: "Resolver checks its own cache — no cached answer, so it starts a full recursive lookup." },
+      { type: "hop", from: "Resolver", to: "Root name server", kind: "query",
+        text: 'Resolver asks a root name server: "Who is authoritative for .' + tld + '?"' },
+      { type: "hop", from: "Root name server", to: "Resolver", kind: "response",
+        text: "Root server doesn't know the answer directly, but refers the resolver to the ." + tld + " TLD name servers." },
+      { type: "hop", from: "Resolver", to: "." + safeTld + " TLD server", kind: "query",
+        text: 'Resolver asks a .' + tld + ' TLD name server: "Who is authoritative for ' + domain + '?"' },
+      { type: "hop", from: "." + safeTld + " TLD server", to: "Resolver", kind: "response",
+        text: "TLD server refers the resolver to " + domain + "'s authoritative name servers." },
+      { type: "hop", from: "Resolver", to: "Authoritative server", kind: "query",
+        text: 'Resolver asks the authoritative name server: "What is the A record for ' + domain + '?"' },
+      { type: "hop", from: "Authoritative server", to: "Resolver", kind: "response",
+        text: "Authoritative server returns the answer: " + domain + " → " + FAKE_IP + " (with a TTL, e.g. 300s)." },
+      { type: "hop", from: "Resolver", to: "OS", kind: "response",
+        text: "Resolver caches the answer for next time (per the TTL) and returns it to the OS." },
+      { type: "hop", from: "OS", to: "Browser", kind: "response",
+        text: "OS passes the IP address back to the browser." },
+      { type: "single", node: "Browser", result: "CONNECT",
+        text: "Browser opens a TCP connection to " + FAKE_IP + " and requests the page." }
+    ];
+  }
+
+  var steps = buildSteps(domainInput.value.trim() || "example.com");
+
+  function render() {
+    diagram.innerHTML = "";
+    for (var i = 0; i <= stepIndex; i++) {
+      var step = steps[i];
+      var row;
+      if (step.type === "single") {
+        row = document.createElement("div");
+        row.className = "hop-single";
+        row.innerHTML =
+          '<div class="hop-node">' + step.node + "</div>" +
+          '<span class="badge ' + (step.result === "MISS" ? "badge-warn" : "badge-ok") + '">' + step.result + "</span>";
+      } else {
+        row = document.createElement("div");
+        row.className = "hop-row";
+        row.innerHTML =
+          '<div class="hop-node">' + step.from + "</div>" +
+          '<div class="hop-line ' + (step.kind === "response" ? "response" : "") + '">' +
+          '<span class="hop-kind-label">' + (step.kind === "response" ? "response" : "query") + "</span>" +
+          "</div>" +
+          '<div class="hop-node">' + step.to + "</div>";
+      }
+      diagram.appendChild(row);
+    }
+
+    if (stepIndex === -1) {
+      stepText.textContent = 'Press "Next" to start resolving.';
+      answerBox.style.display = "none";
+    } else {
+      stepText.textContent = steps[stepIndex].text;
+      if (stepIndex === steps.length - 1) {
+        answerBox.style.display = "block";
+        answerBox.textContent = (domainInput.value.trim() || "example.com") + "  →  " + FAKE_IP;
+      } else {
+        answerBox.style.display = "none";
+      }
+    }
+
+    stepCounter.textContent = stepIndex === -1 ? "Not started" : "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex <= -1;
+    nextBtn.disabled = stepIndex >= steps.length - 1;
+  }
+
+  function reset() {
+    steps = buildSteps(domainInput.value.trim() || "example.com");
+    stepIndex = -1;
+    render();
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > -1) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", reset);
+  domainInput.addEventListener("change", reset);
+
+  render();
+})();
+</script>
+</body>
+</html>
