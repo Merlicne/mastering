@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TLS / HTTPS Handshake — Security — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .version-tabs { display: flex; gap: 6px; margin-bottom: 6px; }
+  .version-tab {
+    padding: 7px 14px; border-radius: 999px; border: 1px solid var(--border);
+    background: var(--bg-elevated); color: var(--text); font-size: 0.85rem; font-weight: 600; cursor: pointer;
+  }
+  .version-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .rtt-note { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 16px; }
+
+  .actors { display: flex; justify-content: space-between; font-weight: 700; padding: 0 4px 6px; }
+  .diagram { display: flex; flex-direction: column; gap: 22px; padding: 10px 4px 6px; min-height: 60px; }
+  .seq-row { position: relative; }
+  .seq-label { text-align: center; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; margin-bottom: 4px; }
+  .seq-arrow { position: relative; height: 2px; background: var(--border); margin: 0 6px; }
+  .seq-arrow.cs { background: var(--accent); }
+  .seq-arrow.sc { background: var(--accent-2); }
+  .seq-arrow.cs::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .seq-arrow.sc::before { content: ""; position: absolute; left: 0; top: -4px; border-style: solid; border-width: 5px 9px 5px 0; border-color: transparent var(--accent-2) transparent transparent; }
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+
+  /* Certificate chain */
+  .cert-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .cert-explorer { grid-template-columns: 1fr; } }
+  .cert-list { display: flex; flex-direction: column; gap: 6px; }
+  .cert-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .cert-btn:hover { border-color: var(--accent); }
+  .cert-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .cert-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+  .cert-detail-grid .label { font-size: 0.72rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 4px; }
+
+  /* Cipher suite anatomy */
+  .cipher-string { display: flex; flex-wrap: wrap; gap: 0; margin: 16px 0; font-family: "SFMono-Regular", Consolas, monospace; font-weight: 700; font-size: 0.95rem; }
+  .cipher-part { padding: 8px 10px; color: #fff; border-radius: 4px; margin-right: 3px; cursor: help; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 1 of 3</span>
+    <h1>TLS / HTTPS Handshake</h1>
+    <p><span class="term" data-tip="Transport Layer Security -- runs on top of TCP (after its own 3-way handshake completes) and encrypts and authenticates everything above it, including HTTP.">TLS</span> is what turns HTTP into HTTPS. Before a single byte of your request is sent, client and server run a handshake that agrees on encryption, proves who the server actually is, and derives keys neither of them sent over the wire in the clear.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">TLS 1.2 vs. TLS 1.3: the handshake, step by step</h3>
+    <p style="margin-top: 0;">TLS 1.3 isn't just "TLS 1.2 but faster" by coincidence — it was redesigned specifically to cut the round trips before any application data can flow.</p>
+
+    <div class="version-tabs" id="versionTabs">
+      <button class="version-tab active" data-version="tls12">TLS 1.2 (2 round trips)</button>
+      <button class="version-tab" data-version="tls13">TLS 1.3 (1 round trip)</button>
+    </div>
+    <div class="rtt-note" id="rttNote"></div>
+
+    <div class="actors">
+      <span>Client</span>
+      <span style="text-align: right;">Server</span>
+    </div>
+    <div class="diagram" id="tlsDiagram"></div>
+
+    <div class="panel step-text" id="tlsStepText" style="margin-top: 14px;"></div>
+    <div class="controls">
+      <button class="btn" id="tlsResetBtn">⟲ Reset</button>
+      <button class="btn" id="tlsPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="tlsNextBtn">Next ▶</button>
+      <span class="step-counter" id="tlsStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Certificate chain: who do you actually trust?</h3>
+    <p style="margin-top: 0;">A browser doesn't trust a website's certificate directly — it trusts a short chain back to a <span class="term" data-tip="A Certificate Authority -- an organization whose root certificate is pre-installed as trusted in your OS or browser. Everything else is trusted only because a CA (or a chain from one) vouches for it.">Certificate Authority</span> whose root certificate shipped with your OS or browser.</p>
+    <div class="cert-explorer">
+      <div class="cert-list" id="certList"></div>
+      <div class="cert-detail-panel" id="certDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Anatomy of a cipher suite</h3>
+    <p style="margin-top: 0;">A TLS 1.2 cipher suite name packs several independent algorithm choices into one string. Hover each piece:</p>
+    <div class="cipher-string">
+      <span class="cipher-part term" style="background:#7c3aed;" data-tip="Elliptic Curve Diffie-Hellman Ephemeral -- how the two sides agree on a shared secret. 'Ephemeral' means a fresh key pair every connection, which is what gives you forward secrecy.">ECDHE</span><span class="cipher-part" style="background:var(--text-muted);">-</span><span class="cipher-part term" style="background:#d97706;" data-tip="RSA here authenticates the server (via its certificate's signature), separate from the key exchange -- TLS 1.2 cipher suites name both a key-exchange algorithm and an authentication algorithm.">RSA</span><span class="cipher-part" style="background:var(--text-muted);">-</span><span class="cipher-part term" style="background:#0d9488;" data-tip="Advanced Encryption Standard, 128-bit key -- the actual symmetric cipher that encrypts the bulk of your traffic once keys are established.">AES128</span><span class="cipher-part" style="background:var(--text-muted);">-</span><span class="cipher-part term" style="background:#2563eb;" data-tip="Galois/Counter Mode -- how AES is applied to a stream of data, providing both encryption and built-in tamper detection in one pass.">GCM</span><span class="cipher-part" style="background:var(--text-muted);">-</span><span class="cipher-part term" style="background:#dc2626;" data-tip="Secure Hash Algorithm 256-bit -- used inside the handshake's integrity checks (HMAC), not to encrypt your data.">SHA256</span>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">TLS 1.3 simplifies this to names like <span class="mono">TLS_AES_128_GCM_SHA256</span> — it always uses ephemeral (EC)DHE key exchange and moved authentication into a separate signature step, so the suite name only needs to describe the bulk cipher and hash.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Certificate expiry causes real outages.</strong> A single expired leaf certificate can take an entire service down instantly and very visibly — automated renewal (e.g. via Let's Encrypt / ACME) exists specifically to eliminate this as a human failure mode.</li>
+      <li style="margin-bottom: 6px;"><strong>"HTTPS" doesn't mean encrypted end-to-end.</strong> A CDN or load balancer that terminates TLS decrypts traffic right there — anything between it and your actual origin server needs its own, separate TLS connection to stay encrypted the whole way.</li>
+      <li style="margin-bottom: 6px;"><strong><span class="term" data-tip="Forward secrecy means that even if a server's long-term private key is stolen in the future, previously recorded encrypted traffic still can't be decrypted -- because each session used its own ephemeral key that was never stored anywhere.">Forward secrecy</span> only holds with ephemeral key exchange.</strong> Older TLS 1.2 configurations using static RSA key exchange (no ECDHE) mean a single future key compromise can retroactively decrypt every session ever recorded — this is exactly why TLS 1.3 made ephemeral exchange mandatory.</li>
+      <li><strong>Downgrade attacks target the negotiation itself.</strong> The handshake's Finished message includes a check covering everything negotiated so far, specifically so a MITM can't quietly force a weaker cipher suite without both sides detecting the tampering.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <span></span>
+    <a href="network-attacks.html">Next: Network Attacks &amp; Defenses →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- TLS handshake step-through ----------------
+  var handshakes = {
+    tls12: {
+      rtt: "2 full round trips before application data can be sent.",
+      steps: [
+        { dir: "cs", msg: "ClientHello", note: "Client proposes a TLS version, a list of supported cipher suites, a random value, and (via SNI) the hostname it wants — letting one server IP host certificates for many different domains." },
+        { dir: "sc", msg: "ServerHello", note: "Server picks one TLS version and cipher suite from the client's offered list, and sends its own random value." },
+        { dir: "sc", msg: "Certificate", note: "Server sends its certificate chain so the client can verify who it's actually talking to." },
+        { dir: "sc", msg: "ServerHelloDone", note: "Server signals it's finished with this phase." },
+        { dir: "cs", msg: "ClientKeyExchange", note: "Client verifies the certificate chain, then sends key material (e.g. an ECDHE public value) that lets both sides derive the same session keys — without the actual key ever crossing the network." },
+        { dir: "cs", msg: "ChangeCipherSpec, Finished", note: "Client switches on encryption and sends a Finished message — the first message actually protected by the new session keys, proving the negotiation wasn't tampered with." },
+        { dir: "sc", msg: "ChangeCipherSpec, Finished", note: "Server does the same. Both sides have now proven they derived matching keys." },
+        { dir: "cs", msg: "Application Data (encrypted)", note: "Only now, after 2 full round trips, does actual HTTP traffic begin." }
+      ]
+    },
+    tls13: {
+      rtt: "1 round trip before application data (0-RTT is possible on a repeat visit, with caveats — see gotchas).",
+      steps: [
+        { dir: "cs", msg: "ClientHello + key_share", note: "Client guesses which key-exchange group the server will pick and includes its public key material upfront, betting it won't need an extra round trip just to negotiate this." },
+        { dir: "sc", msg: "ServerHello + key_share", note: "Server replies with its own key material. Both sides can now derive session keys immediately — before the handshake has even finished." },
+        { dir: "sc", msg: "{EncryptedExtensions, Certificate, CertificateVerify, Finished}", note: "Everything from here on, including the certificate itself, is already encrypted — unlike TLS 1.2, a passive eavesdropper can't see which certificate the server presented." },
+        { dir: "cs", msg: "Finished (encrypted)", note: "Client confirms. The handshake completed in a single round trip." },
+        { dir: "cs", msg: "Application Data (encrypted)", note: "HTTP traffic begins after just 1 round trip — half of TLS 1.2's cost." }
+      ]
+    }
+  };
+
+  var currentVersion = "tls12";
+  var tlsStepIndex = 0;
+
+  var versionTabs = document.getElementById("versionTabs");
+  var rttNote = document.getElementById("rttNote");
+  var tlsDiagram = document.getElementById("tlsDiagram");
+  var tlsStepText = document.getElementById("tlsStepText");
+  var tlsStepCounter = document.getElementById("tlsStepCounter");
+  var tlsPrevBtn = document.getElementById("tlsPrevBtn");
+  var tlsNextBtn = document.getElementById("tlsNextBtn");
+  var tlsResetBtn = document.getElementById("tlsResetBtn");
+
+  function renderTls() {
+    var hs = handshakes[currentVersion];
+    rttNote.textContent = hs.rtt;
+
+    tlsDiagram.innerHTML = "";
+    for (var i = 0; i <= tlsStepIndex; i++) {
+      var step = hs.steps[i];
+      var row = document.createElement("div");
+      row.className = "seq-row";
+      row.innerHTML = '<div class="seq-label">' + step.msg + '</div><div class="seq-arrow ' + step.dir + '"></div>';
+      tlsDiagram.appendChild(row);
+    }
+
+    tlsStepText.textContent = hs.steps[tlsStepIndex].note;
+    tlsStepCounter.textContent = "Step " + (tlsStepIndex + 1) + " / " + hs.steps.length;
+    tlsPrevBtn.disabled = tlsStepIndex === 0;
+    tlsNextBtn.disabled = tlsStepIndex === hs.steps.length - 1;
+  }
+
+  versionTabs.addEventListener("click", function (e) {
+    var btn = e.target.closest(".version-tab");
+    if (!btn) return;
+    Array.prototype.forEach.call(versionTabs.children, function (b) { b.classList.remove("active"); });
+    btn.classList.add("active");
+    currentVersion = btn.dataset.version;
+    tlsStepIndex = 0;
+    renderTls();
+  });
+  tlsPrevBtn.addEventListener("click", function () { if (tlsStepIndex > 0) { tlsStepIndex--; renderTls(); } });
+  tlsNextBtn.addEventListener("click", function () {
+    var hs = handshakes[currentVersion];
+    if (tlsStepIndex < hs.steps.length - 1) { tlsStepIndex++; renderTls(); }
+  });
+  tlsResetBtn.addEventListener("click", function () { tlsStepIndex = 0; renderTls(); });
+  renderTls();
+
+  // ---------------- Certificate chain explorer ----------------
+  var certs = [
+    { name: "Leaf: www.example.com", subject: "CN=www.example.com", issuer: "Example Domain Validation CA", pubkey: "EC (P-256)", validity: "90 days (typical for automated issuance)",
+      desc: "The certificate for the actual site you're visiting. Its signature is verified using the intermediate CA's public key — not trusted on its own." },
+    { name: "Intermediate: Domain Validation CA", subject: "CN=Example Domain Validation CA", issuer: "Example Root CA", pubkey: "RSA 2048-bit", validity: "~10 years",
+      desc: "Signs leaf certificates on the root's behalf. Splitting this out means the root's private key can stay offline in a vault, rarely touched — if an intermediate is ever compromised, it can be revoked without invalidating the root itself." },
+    { name: "Root: Example Root CA", subject: "CN=Example Root CA", issuer: "Self-signed", pubkey: "RSA 4096-bit", validity: "~25 years",
+      desc: "The anchor of trust. Its certificate is self-signed and pre-installed as trusted in your OS/browser's trust store — everything else is trusted only transitively, through this." }
+  ];
+
+  var certList = document.getElementById("certList");
+  var certDetail = document.getElementById("certDetail");
+
+  function renderCertDetail(cert) {
+    certDetail.innerHTML =
+      "<h4 style=\"margin-top:0;\">" + cert.name + "</h4>" +
+      '<div class="cert-detail-grid">' +
+      '<div><div class="label">Subject</div><div class="mono">' + cert.subject + "</div></div>" +
+      '<div><div class="label">Issuer</div><div class="mono">' + cert.issuer + "</div></div>" +
+      '<div><div class="label">Public key</div><div class="mono">' + cert.pubkey + "</div></div>" +
+      '<div><div class="label">Typical validity</div><div>' + cert.validity + "</div></div>" +
+      "</div><p>" + cert.desc + "</p>";
+  }
+
+  certs.forEach(function (cert, idx) {
+    var btn = document.createElement("button");
+    btn.className = "cert-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = cert.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(certList.children, function (c) { c.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderCertDetail(cert);
+    });
+    certList.appendChild(btn);
+  });
+  renderCertDetail(certs[0]);
+})();
+</script>
+</body>
+</html>

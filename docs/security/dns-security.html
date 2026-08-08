@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DNS Security — Security — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .race-controls { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; flex-wrap: wrap; }
+  .race-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 10px 0; flex-wrap: wrap; }
+  .race-box { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; }
+  .race-arrow { font-size: 1rem; }
+  .race-arrow.legit { color: var(--ok); font-weight: 700; }
+  .race-arrow.forged { color: var(--danger); font-weight: 700; }
+
+  .chain-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .chain-explorer { grid-template-columns: 1fr; } }
+  .chain-list { display: flex; flex-direction: column; gap: 6px; }
+  .chain-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .chain-btn:hover { border-color: var(--accent); }
+  .chain-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 3 of 3</span>
+    <h1>DNS Security</h1>
+    <p>This page is the capstone: <span class="term" data-tip="A DNS response that gets cached even though it was forged, not genuine -- redirecting everyone who queries that name until the poisoned entry's TTL expires.">cache poisoning</span> is the same spoofing pattern as ARP spoofing from the previous page, and <span class="term" data-tip="Domain Name System Security Extensions -- adds cryptographic signatures to DNS records so a resolver can verify a response is authentic and untampered.">DNSSEC</span>'s trust model is the same chain-of-signatures idea as TLS's certificate chain. If you've read the other two Security pages, you already know most of the shapes involved here.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Cache poisoning: winning a race against the real answer</h3>
+    <p style="margin-top: 0;">When a <a href="../networking/dns-resolution.html">resolver</a> queries an authoritative server, nothing cryptographically proves the reply is genuine — only a 16-bit transaction ID and, defensively, a randomized source port stand between an attacker's guess and a resolver believing a forged answer. Get the guess right before the real answer arrives, and the resolver caches the attacker's answer for the TTL's entire duration.</p>
+
+    <div class="race-controls">
+      <label><input type="checkbox" id="portRandToggle" checked> Source port randomization enabled</label>
+      <button class="btn btn-primary" id="raceBtn">Attacker attempts cache poisoning</button>
+      <button class="btn" id="raceResetBtn">⟲ Reset</button>
+    </div>
+
+    <div class="race-row" id="raceRow"></div>
+    <div class="panel" id="raceOutput">Press the button to attempt an attack.</div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">DNSSEC: a chain of signatures, not certificates</h3>
+    <p style="margin-top: 0;">DNSSEC's trust model mirrors <a href="tls-handshake.html">TLS's certificate chain</a> almost exactly: instead of one root CA's key being pre-installed as a trust anchor, a resolver has the DNS root zone's public key built in, and validates a chain of signatures down to the record you actually asked for.</p>
+    <div class="chain-explorer">
+      <div class="chain-list" id="chainList"></div>
+      <div class="chain-detail-panel" id="chainDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">DoH/DoT vs. DNSSEC: two different problems</h3>
+    <p style="margin-top: 0;">These get confused constantly because both sound like "DNS but secure" — they secure completely different things.</p>
+    <table>
+      <thead><tr><th></th><th>DNSSEC</th><th>DoH / DoT</th></tr></thead>
+      <tbody>
+        <tr><td>Solves</td><td>Authenticity — is this answer genuine and untampered?</td><td>Confidentiality — can anyone on the path see what I looked up?</td></tr>
+        <tr><td>Does NOT solve</td><td>Privacy — the query is still sent in the clear</td><td>Authenticity — it only encrypts the hop to whichever resolver you chose; that resolver could still lie to you</td></tr>
+        <tr><td>Closest analogy</td><td>A signed document</td><td>A sealed envelope</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">DNS amplification: spoofing meets a small-request-big-response ratio</h3>
+    <p style="margin-top: 0;">This is the <a href="network-attacks.html">IP spoofing</a> pattern applied specifically to DNS: an attacker sends a small query with a victim's spoofed address as the source to an <span class="term" data-tip="A DNS resolver that will perform recursive lookups for any client on the internet, not just its own trusted users -- exactly the kind of server amplification attacks abuse.">open resolver</span>, requesting something with a large reply (like an ANY record or a large EDNS0 buffer). The resolver dutifully sends that large reply — to the victim, not the attacker. A 60-byte query producing a multi-kilobyte reply gives an attacker tens of times their original bandwidth for free.</p>
+    <p style="margin-top: 0;">Defenses: don't run resolvers that answer <span class="term" data-tip="Whether a DNS server will chase down an answer on a client's behalf (recursive) versus only answering for zones it's directly authoritative for. Open recursion to the whole internet is what makes a resolver useful for amplification.">recursive</span> queries for the whole internet — restrict recursion to known clients — and rate-limit identical responses to repeated sources.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>DNSSEC fails closed.</strong> A botched key rotation can make an entire signed domain unresolvable for everyone using a validating resolver — not "slightly less secure," fully broken. This operational risk is a real reason adoption has lagged for decades.</li>
+      <li style="margin-bottom: 6px;"><strong>Most DNS traffic still has no integrity protection at all.</strong> DNSSEC adoption remains far from universal — the same collective-action gap as ingress filtering from the previous page.</li>
+      <li style="margin-bottom: 6px;"><strong>DoH can bypass enterprise network filtering.</strong> IT teams that inspect plain DNS queries to enforce content policy or catch malware callbacks lose that visibility the moment a client switches to its own encrypted resolver — a genuine, actively debated policy tradeoff, not just a technical one.</li>
+      <li><strong>Encrypting the DNS query doesn't fully hide which site you're visiting.</strong> TLS's own ClientHello has historically leaked the destination hostname in the clear via <a href="tls-handshake.html">SNI</a> — so DoH's confidentiality gain is undercut unless it's paired with Encrypted Client Hello too.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="network-attacks.html">← Previous: Network Attacks &amp; Defenses</a>
+    <a href="index.html">Back to Security overview →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Cache poisoning race demo ----------------
+  var portRandToggle = document.getElementById("portRandToggle");
+  var raceBtn = document.getElementById("raceBtn");
+  var raceResetBtn = document.getElementById("raceResetBtn");
+  var raceRow = document.getElementById("raceRow");
+  var raceOutput = document.getElementById("raceOutput");
+
+  function renderRaceRow(state) {
+    if (state === "none") {
+      raceRow.innerHTML = '<div class="race-box">Resolver</div><span class="race-arrow">── query ──▶</span><div class="race-box">Authoritative server</div>';
+      return;
+    }
+    if (state === "blocked") {
+      raceRow.innerHTML =
+        '<div class="race-box">Attacker’s forged reply</div><span class="race-arrow forged">✕ wrong port, discarded</span><div class="race-box">Resolver</div>' +
+        '<span class="race-arrow legit">◀── real answer ──</span><div class="race-box">Authoritative server</div>';
+      return;
+    }
+    raceRow.innerHTML =
+      '<div class="race-box" style="border-color: var(--danger); color: var(--danger);">Attacker’s forged reply</div><span class="race-arrow forged">✓ correct port + ID ──▶</span><div class="race-box">Resolver (poisoned)</div>';
+  }
+
+  raceBtn.addEventListener("click", function () {
+    if (portRandToggle.checked) {
+      renderRaceRow("blocked");
+      raceOutput.textContent = "The attacker's forged response arrived on the wrong source port. The resolver silently discards it and accepts the real answer when it arrives — the poisoning attempt failed.";
+    } else {
+      renderRaceRow("poisoned");
+      raceOutput.textContent = "With a fixed, predictable source port, the attacker only had to guess the 16-bit transaction ID — well within brute-forcing range. The forged answer is now cached and served to every subsequent query for this name until its TTL expires.";
+    }
+  });
+  raceResetBtn.addEventListener("click", function () {
+    renderRaceRow("none");
+    raceOutput.textContent = "Press the button to attempt an attack.";
+  });
+  renderRaceRow("none");
+
+  // ---------------- DNSSEC chain explorer ----------------
+  var chainSteps = [
+    { name: "Root zone key", desc: "The one trust anchor a validating resolver has built in — everything else is trusted only transitively, through a chain of signatures starting here, exactly like a browser's root CA store." },
+    { name: ".com TLD key", desc: "The root zone signs a record (a DS record) vouching for the .com zone's own key — establishing that this TLD's signatures can be trusted." },
+    { name: "example.com zone key", desc: "The .com zone in turn signs a DS record vouching for example.com's key, delegating trust one level further down." },
+    { name: "example.com A record (signed)", desc: "The actual answer, with an RRSIG signature attached. A validating resolver checks this signature against the chain above before accepting the record as genuine." }
+  ];
+  var chainList = document.getElementById("chainList");
+  var chainDetail = document.getElementById("chainDetail");
+
+  function renderChainDetail(step) {
+    chainDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + step.name + "</h4><p>" + step.desc + "</p>";
+  }
+  chainSteps.forEach(function (step, idx) {
+    var btn = document.createElement("button");
+    btn.className = "chain-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = step.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(chainList.children, function (c) { c.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderChainDetail(step);
+    });
+    chainList.appendChild(btn);
+  });
+  renderChainDetail(chainSteps[0]);
+})();
+</script>
+</body>
+</html>

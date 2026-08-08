@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Interactive Mini-Course</span>
+    <h1>Security</h1>
+    <p>Three hands-on pages building directly on the <a href="../networking/index.html">Networking</a> subject: how TLS actually encrypts a connection, how attackers exploit the mechanisms you've already learned, and how DNS gets secured — or spoofed.</p>
+  </div>
+
+  <div class="topic-grid">
+    <a class="topic-card" href="tls-handshake.html">
+      <span class="icon">🔐</span>
+      <h3>TLS / HTTPS Handshake</h3>
+      <p>Step through TLS 1.2 vs 1.3, explore a certificate chain, and see what's actually inside a cipher suite name.</p>
+    </a>
+
+    <a class="topic-card" href="network-attacks.html">
+      <span class="icon">🕵️</span>
+      <h3>Network Attacks &amp; Defenses</h3>
+      <p>ARP spoofing, port scanning, SYN floods, IP spoofing — the mechanisms from the Networking pages, now exploited.</p>
+    </a>
+
+    <a class="topic-card" href="dns-security.html">
+      <span class="icon">🛰️</span>
+      <h3>DNS Security</h3>
+      <p>Cache poisoning, DNSSEC's chain of trust, and why DoH/DoT solve a completely different problem than DNSSEC.</p>
+    </a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+</body>
+</html>

@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network Attacks &amp; Defenses — Security — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .path-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 18px 0; flex-wrap: wrap; }
+  .path-box { padding: 10px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.88rem; font-weight: 600; }
+  .path-box.attacker { border-color: var(--danger); color: var(--danger); }
+  .path-arrow { font-size: 1.1rem; color: var(--text-muted); }
+  .path-arrow.rerouted { color: var(--danger); font-weight: 700; }
+
+  .scan-controls { display: flex; gap: 10px; align-items: center; margin-bottom: 14px; flex-wrap: wrap; }
+  .scan-row td:first-child { font-family: "SFMono-Regular", Consolas, monospace; }
+
+  .flood-controls { display: flex; align-items: center; gap: 14px; margin: 14px 0; flex-wrap: wrap; }
+  .flood-meter-track { width: 100%; height: 22px; border-radius: 6px; background: var(--code-bg); border: 1px solid var(--code-border); overflow: hidden; margin-bottom: 10px; }
+  .flood-meter-fill { height: 100%; background: var(--accent); transition: width 0.4s ease, background 0.4s ease; }
+  .flood-meter-fill.full { background: var(--danger); }
+  .flood-status { font-weight: 700; }
+  .flood-status.ok { color: var(--ok); }
+  .flood-status.bad { color: var(--danger); }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 2 of 3</span>
+    <h1>Network Attacks &amp; Defenses</h1>
+    <p>None of this is new machinery — every attack below abuses a mechanism from the <a href="../networking/index.html">Networking</a> pages exactly as designed, just pointed at a goal its designers didn't intend.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">ARP spoofing: hijacking the local network</h3>
+    <p style="margin-top: 0;"><span class="term" data-tip="Address Resolution Protocol -- maps a known IP address to a MAC address on the local link. It was designed with no authentication at all: any device can claim to own any IP.">ARP</span> has no authentication built in. An attacker on the same local network can send forged ARP replies claiming to own the gateway's IP address — every other device updates its ARP table to match, and now routes its internet-bound traffic through the attacker first.</p>
+
+    <div class="controls" style="margin-top: 0;">
+      <button class="btn" id="arpToggleBtn">Poison the ARP cache</button>
+    </div>
+
+    <table>
+      <thead><tr><th>IP</th><th>Resolves to (MAC)</th></tr></thead>
+      <tbody id="arpTableBody"></tbody>
+    </table>
+
+    <div class="path-row" id="arpPathRow"></div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;" id="arpNote"></p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Port scanning: probing with a half-open handshake</h3>
+    <p style="margin-top: 0;">A <span class="term" data-tip="Also called a half-open scan (nmap's -sS). The scanner sends a SYN and waits for a SYN-ACK, then sends an RST instead of completing the handshake -- so it never actually opens a full connection, which is both faster and stealthier.">SYN scan</span> reuses the exact first step of the <a href="../networking/tcp-handshake.html">TCP handshake</a>: send a SYN, see what comes back, and never finish connecting.</p>
+    <div class="scan-controls">
+      <button class="btn btn-primary" id="scanBtn">Scan common ports</button>
+    </div>
+    <table>
+      <thead><tr><th>Port</th><th>Guessed service</th><th>Response</th><th>Scanner concludes</th></tr></thead>
+      <tbody id="scanBody"></tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">Notice ports 8080 and 3306 both show up "closed-looking" for different reasons: 8080 gets an actual RST (nothing's listening), while 3306 gets no response at all because a <a href="../networking/firewalls.html">firewall rule is silently DROPping it</a> — a scanner genuinely can't tell "dropped by policy" from "packet lost in transit." That ambiguity is exactly why <a href="../networking/firewalls.html">DROP</a> is preferred over REJECT for stealth: a REJECTed port and a naturally closed port look identical to a scanner.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">SYN flood: exhausting the half-open connection table</h3>
+    <p style="margin-top: 0;">Every server has to remember something for every SYN it acknowledges, while waiting for the final ACK — that's the <span class="mono">SYN_RECEIVED</span> state from the <a href="../networking/tcp-handshake.html">TCP Handshake page</a>. An attacker sends a flood of SYNs and never sends that final ACK, filling the table with connections that will never complete until legitimate SYNs have nowhere left to go.</p>
+
+    <div class="flood-controls">
+      <label><input type="checkbox" id="cookiesToggle"> Enable <span class="term" data-tip="A defense where the server doesn't allocate any per-connection state on receiving a SYN -- it encodes what it needs into the SYN-ACK's sequence number instead, so a flood of SYNs that never get ACKed costs the server almost nothing.">SYN cookies</span></label>
+      <button class="btn btn-primary" id="floodBtn">Simulate flood (1,000 SYNs)</button>
+      <button class="btn" id="floodResetBtn">⟲ Reset</button>
+    </div>
+    <div class="flood-meter-track"><div class="flood-meter-fill" id="floodMeterFill" style="width: 0%;"></div></div>
+    <div class="flood-status" id="floodStatus"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">IP spoofing &amp; ingress filtering</h3>
+    <p style="margin-top: 0;">Nothing checks that a packet's source address is genuine — <a href="../networking/l3-routing.html">routing</a> only ever looks at the destination. That's what lets an attacker forge a SYN flood's source addresses, and what powers amplification attacks: send a small request with a victim's spoofed address as the source, and let a third party's large reply flood the victim instead of the attacker.</p>
+    <p style="margin-top: 0;">The fix belongs at the network edge, not the destination: an ISP's router should only forward packets whose source address genuinely belongs to that customer's assigned range — a practice called <span class="term" data-tip="Best Current Practice 38 -- an IETF recommendation that network operators filter outbound traffic at the edge, dropping any packet whose source address doesn't genuinely belong to that customer, so spoofed-source attacks can't leave the network they originated from.">ingress filtering (BCP38)</span>. It has to be deployed at the source network to work — a victim's own firewall can't undo a spoofed source address after the fact.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">DDoS: three different things people lump together</h3>
+    <table>
+      <thead><tr><th>Category</th><th>What it saturates</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td>Volumetric</td><td>Raw bandwidth</td><td>DNS/NTP amplification flooding the link itself</td></tr>
+        <tr><td>Protocol</td><td>Connection-state tables</td><td>SYN flood, above</td></tr>
+        <tr><td>Application-layer</td><td>Server-side request processing</td><td>A flood of real-looking HTTP requests — much harder to filter by IP or pattern alone</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Port scans are usually reconnaissance, not the attack itself.</strong> Seeing repeated scans in logs is an early-warning signal worth acting on, not background noise to ignore.</li>
+      <li style="margin-bottom: 6px;"><strong>ARP spoofing can't cross the internet.</strong> It only works within the same local broadcast domain — exactly why network segmentation (VLANs) limits how far a single compromised device can reach.</li>
+      <li style="margin-bottom: 6px;"><strong>Ingress filtering is a collective-action problem.</strong> An unfiltered network mostly harms <em>other</em> networks' targets, not its own users — which is a large part of why BCP38 adoption has historically been incomplete despite being well understood for decades.</li>
+      <li><strong>A firewall doesn't stop a volumetric flood.</strong> If the attack saturates the link before packets even reach your firewall, its rules never get evaluated — that needs upstream ISP-level or CDN/scrubbing-service mitigation instead.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="tls-handshake.html">← Previous: TLS / HTTPS Handshake</a>
+    <a href="dns-security.html">Next: DNS Security →</a>
+  </div>
+</div>
+
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- ARP spoofing demo ----------------
+  var arpPoisoned = false;
+  var arpToggleBtn = document.getElementById("arpToggleBtn");
+  var arpTableBody = document.getElementById("arpTableBody");
+  var arpPathRow = document.getElementById("arpPathRow");
+  var arpNote = document.getElementById("arpNote");
+
+  function renderArp() {
+    arpTableBody.innerHTML =
+      "<tr><td class=\"mono\">192.168.1.1 (gateway)</td><td class=\"mono\">" +
+      (arpPoisoned ? "de:ad:be:ef:00:66 <span class=\"badge badge-danger\">forged</span>" : "aa:bb:cc:11:22:33") +
+      "</td></tr>";
+
+    arpPathRow.innerHTML = arpPoisoned
+      ? '<div class="path-box">Victim</div><span class="path-arrow rerouted">──▶</span><div class="path-box attacker">Attacker</div><span class="path-arrow rerouted">──▶</span><div class="path-box">Gateway / Internet</div>'
+      : '<div class="path-box">Victim</div><span class="path-arrow">──▶</span><div class="path-box">Gateway / Internet</div>';
+
+    arpNote.textContent = arpPoisoned
+      ? "Every packet the victim sends now passes through the attacker first, who can read, modify, or drop it before forwarding it on — a classic man-in-the-middle (MITM) position, achieved without touching a single cable."
+      : "Normal state: the victim's traffic goes straight to the real gateway.";
+
+    arpToggleBtn.textContent = arpPoisoned ? "Restore the real ARP entry" : "Poison the ARP cache";
+  }
+
+  arpToggleBtn.addEventListener("click", function () {
+    arpPoisoned = !arpPoisoned;
+    renderArp();
+  });
+  renderArp();
+
+  // ---------------- Port scan demo ----------------
+  var scanTargets = [
+    { port: 22, service: "SSH", state: "open" },
+    { port: 80, service: "HTTP", state: "open" },
+    { port: 443, service: "HTTPS", state: "open" },
+    { port: 3306, service: "MySQL", state: "filtered" },
+    { port: 8080, service: "HTTP-alt", state: "closed" },
+    { port: 31337, service: "(unknown)", state: "filtered" }
+  ];
+  var scanBtn = document.getElementById("scanBtn");
+  var scanBody = document.getElementById("scanBody");
+
+  var scanMeta = {
+    open: { response: "SYN-ACK received", conclude: "OPEN", cls: "badge-ok" },
+    closed: { response: "RST received", conclude: "CLOSED", cls: "" },
+    filtered: { response: "No response (timeout)", conclude: "FILTERED", cls: "badge-warn" }
+  };
+
+  scanBtn.addEventListener("click", function () {
+    scanBody.innerHTML = "";
+    scanTargets.forEach(function (t) {
+      var meta = scanMeta[t.state];
+      var tr = document.createElement("tr");
+      tr.className = "scan-row";
+      tr.innerHTML = "<td>" + t.port + "</td><td>" + t.service + "</td><td>" + meta.response + "</td><td><span class=\"badge " + meta.cls + "\">" + meta.conclude + "</span></td>";
+      scanBody.appendChild(tr);
+    });
+  });
+
+  // ---------------- SYN flood demo ----------------
+  var cookiesToggle = document.getElementById("cookiesToggle");
+  var floodBtn = document.getElementById("floodBtn");
+  var floodResetBtn = document.getElementById("floodResetBtn");
+  var floodMeterFill = document.getElementById("floodMeterFill");
+  var floodStatus = document.getElementById("floodStatus");
+  var halfOpenCount = 0;
+  var CAPACITY = 1000;
+
+  function renderFlood() {
+    var pct = Math.min(100, (halfOpenCount / CAPACITY) * 100);
+    floodMeterFill.style.width = pct + "%";
+    floodMeterFill.className = "flood-meter-fill" + (pct >= 100 ? " full" : "");
+
+    if (cookiesToggle.checked) {
+      floodStatus.className = "flood-status ok";
+      floodStatus.textContent = "SYN cookies enabled: no per-connection state is stored until the final ACK arrives, so the flood costs the server almost nothing. Half-open table stays empty. Legitimate users connect normally.";
+    } else if (halfOpenCount >= CAPACITY) {
+      floodStatus.className = "flood-status bad";
+      floodStatus.textContent = "Half-open connection table is full (" + halfOpenCount + " / " + CAPACITY + "). New legitimate connection attempts are now being dropped.";
+    } else if (halfOpenCount > 0) {
+      floodStatus.className = "flood-status";
+      floodStatus.textContent = halfOpenCount + " / " + CAPACITY + " half-open connections held, waiting for ACKs that will never arrive.";
+    } else {
+      floodStatus.className = "flood-status";
+      floodStatus.textContent = "No attack in progress.";
+    }
+  }
+
+  floodBtn.addEventListener("click", function () {
+    if (!cookiesToggle.checked) {
+      halfOpenCount = CAPACITY;
+    }
+    renderFlood();
+  });
+  floodResetBtn.addEventListener("click", function () {
+    halfOpenCount = 0;
+    renderFlood();
+  });
+  cookiesToggle.addEventListener("change", renderFlood);
+  renderFlood();
+})();
+</script>
+</body>
+</html>

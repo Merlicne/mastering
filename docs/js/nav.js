@@ -25,6 +25,19 @@
           ]
         }
       ]
+    },
+    security: {
+      groups: [
+        {
+          name: "Security",
+          items: [
+            { href: "index.html", label: "Home" },
+            { href: "tls-handshake.html", label: "TLS Handshake" },
+            { href: "network-attacks.html", label: "Network Attacks" },
+            { href: "dns-security.html", label: "DNS Security" }
+          ]
+        }
+      ]
     }
   };
 
