@@ -134,9 +134,49 @@
         <tr><td class="mono">MX</td><td>"Mail Exchange" — which mail server should receive email for this domain, with a priority for failover.</td></tr>
         <tr><td class="mono">TXT</td><td>Arbitrary text, commonly used for domain-ownership verification and email anti-spoofing records like <span class="term" data-tip="Sender Policy Framework -- a TXT record listing which mail servers are allowed to send email claiming to be from this domain.">SPF</span>.</td></tr>
         <tr><td class="mono">NS</td><td>"Name Server" — declares which servers are authoritative for this domain. This is exactly what the TLD referral hands back in the walkthrough above.</td></tr>
-        <tr><td class="mono">SOA</td><td>"Start of Authority" — metadata about the zone itself: the primary name server, an admin contact, and timers like the default TTL.</td></tr>
+        <tr><td class="mono">SOA</td><td>"Start of Authority" — metadata about the zone itself: the primary name server, an admin contact, and several timers — including the negative-caching TTL described below.</td></tr>
       </tbody>
     </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">TTL: who sets it, and where negative caching lives</h3>
+    <p style="margin-top: 0;">Every record's <span class="term" data-tip="Time To Live -- how many seconds a cache is allowed to reuse a record before it must ask the authoritative source again.">TTL</span> is set at the authoritative source, by whoever administers the zone — it travels with the answer through every cache along the way. Different record types for the same name often carry completely different TTLs:</p>
+    <table>
+      <thead><tr><th>Record</th><th>Typical TTL</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">A (example.com)</td><td class="mono">300s</td><td>Might need to fail over to a new server quickly</td></tr>
+        <tr><td class="mono">MX (example.com)</td><td class="mono">3600s</td><td>The mail server rarely changes</td></tr>
+        <tr><td class="mono">NS (example.com)</td><td class="mono">86400s</td><td>Who's authoritative almost never changes</td></tr>
+      </tbody>
+    </table>
+    <p>Negative answers — NXDOMAIN, or "no record of this type" — get cached too, but their duration comes from a different place entirely: the zone's <span class="term" data-tip="Start of Authority -- metadata about a zone: primary name server, admin contact, a serial number, refresh/retry/expire timers for secondary servers, and (per RFC 2308) the negative-caching TTL.">SOA record</span>'s minimum field (per RFC 2308), not any individual record's own TTL.</p>
+    <p style="margin-bottom: 0;">TTL also doesn't travel back in time: every cache layer — resolver, OS, browser — stores its own "expires at" timestamp from the moment <em>it</em> first cached the answer. There's no push notification when a record changes; each layer just independently notices its copy is stale once its own timer runs out. That's what "propagation" actually is: independent timers expiring at different moments, not a wave moving outward. It's why the standard move before migrating a record is lowering its TTL a day or two ahead of cutover, so every cache has already rolled over to the short TTL by the time the real change happens.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">OS-level caching differs by platform</h3>
+    <p style="margin-top: 0;">Once an answer leaves the resolver, whether — and how — it gets cached again on your own machine depends entirely on the operating system:</p>
+    <table>
+      <thead><tr><th>OS</th><th>Built-in caching?</th><th>Inspect / flush</th></tr></thead>
+      <tbody>
+        <tr><td>Windows</td><td>Yes — the DNS Client service, honoring the response's real TTL</td><td class="mono">ipconfig /displaydns · ipconfig /flushdns</td></tr>
+        <tr><td>macOS</td><td>Yes — via mDNSResponder, also honoring the real TTL</td><td class="mono">dscacheutil -flushcache</td></tr>
+        <tr><td>Linux</td><td>No, not by default — glibc's resolver caches nothing at all; only a local daemon like <span class="term" data-tip="A common modern Linux component that resolves and caches DNS lookups on behalf of the system, honoring each record's real TTL -- but it isn't present or active on every distro.">systemd-resolved</span>, nscd, or dnsmasq caches, if one happens to be running</td><td class="mono">resolvectl flush-caches</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">This is why the same lookup can behave differently right next to each other: a Linux box with no local caching daemon re-queries fresh every time, while a Windows machine beside it can keep confidently serving an answer it cached ten minutes ago.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The hosts file: no DNS, no TTL, no caching</h3>
+    <p style="margin-top: 0;">The <span class="term" data-tip="A plain text file -- /etc/hosts on Linux/macOS, C:\Windows\System32\drivers\etc\hosts on Windows -- mapping hostnames directly to IP addresses, checked before any DNS query is made.">hosts file</span> is a fundamentally different mechanism from everything else on this page. On Linux and macOS, the resolution order itself — typically the <span class="mono">hosts: files dns</span> line in <span class="term" data-tip="/etc/nsswitch.conf -- configures whether the hosts file or DNS gets checked first (and whether the other is even consulted) when resolving a name.">/etc/nsswitch.conf</span> — checks the hosts file first. If a name matches there:</p>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;">No DNS query is sent at all — TTL never enters the picture, because DNS itself is never consulted.</li>
+      <li style="margin-bottom: 6px;">The entry never expires on its own — it's a static mapping that only changes when someone edits the file.</li>
+      <li>It's purely local to that one machine — never distributed, never cached anywhere downstream.</li>
+    </ul>
+    <p style="margin-bottom: 0;">This is exactly why editing your hosts file is the standard trick for testing a site against a new server before an actual DNS cutover — it sidesteps TTL and caching entirely. It's also a classic troubleshooting trap: someone updates DNS, waits out the TTL, and still gets the old answer, because a stale hosts file entry was winning the whole time and DNS was never even queried.</p>
   </div>
 
   <div class="card" style="margin-top: 20px;">
