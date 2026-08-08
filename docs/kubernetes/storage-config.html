@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storage &amp; Configuration — Kubernetes — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .pvc-fields { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; align-items: flex-end; }
+  .pvc-fields .field { display: flex; flex-direction: column; gap: 6px; }
+  .pvc-fields .field label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .pvc-fields input, .pvc-fields select { width: 160px; }
+  tr.pv-match { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  tr.pv-nomatch { opacity: 0.5; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 4 of 6</span>
+    <h1>Storage &amp; Configuration</h1>
+    <p>Containers are meant to be disposable — so anything that needs to survive a restart, a reschedule, or a config change needs its own Kubernetes objects rather than living inside the container image.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Volumes: storage tied to a Pod's lifetime</h3>
+    <p style="margin-top: 0;">A plain <span class="term" data-tip="Storage attached directly to a Pod spec (emptyDir, hostPath, etc.) rather than a separate cluster object. Its lifetime is tied to the Pod, not independent of it.">Volume</span> like <span class="mono">emptyDir</span> exists only as long as the Pod does — useful scratch space, or a way for containers in the same Pod to share files, but gone the moment the Pod is rescheduled elsewhere.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">PersistentVolume &amp; PersistentVolumeClaim: decoupling storage from Pods</h3>
+    <p style="margin-top: 0;">A <span class="term" data-tip="A piece of storage provisioned in the cluster -- by an admin ahead of time, or dynamically on demand -- with a lifecycle independent of any specific Pod.">PersistentVolume (PV)</span> is real storage with its own lifecycle. A <span class="term" data-tip="A request for storage matching certain criteria (size, access mode, storage class), made without needing to know exactly which PV will satisfy it.">PersistentVolumeClaim (PVC)</span> is a request for storage matching certain criteria — size, access mode, class — without needing to know which specific PV will satisfy it. This is the same decoupling idea as a <a href="../networking/kubernetes-networking.html">Service</a> hiding which exact Pod answers a request, just applied to storage instead of networking.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">StorageClass: dynamic provisioning</h3>
+    <p style="margin-top: 0;">Instead of an admin pre-creating PVs by hand, a PVC can reference a <span class="term" data-tip="A named profile (e.g. 'fast-ssd') that tells a provisioner how to dynamically create a matching PersistentVolume on demand, instead of requiring one to already exist.">StorageClass</span>, and its provisioner creates a matching PV automatically. Each PV also has a <span class="term" data-tip="What happens to the underlying storage when its PersistentVolumeClaim is deleted. 'Retain' keeps the data (manual cleanup needed); 'Delete' destroys the underlying storage too -- often the default for dynamically provisioned volumes.">reclaim policy</span> — Retain keeps the data around after the PVC is gone; Delete destroys it too.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">PVC-to-PV binding, live</h3>
+    <div class="pvc-fields">
+      <div class="field"><label for="pvcSize">PVC requests (Gi)</label><input type="number" id="pvcSize" value="10" min="1"></div>
+      <div class="field"><label for="pvcClass">PVC storageClassName</label>
+        <select id="pvcClass">
+          <option value="fast-ssd">fast-ssd</option>
+          <option value="standard">standard</option>
+          <option value="">(none — static PVs only)</option>
+        </select>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>PersistentVolume</th><th>Capacity</th><th>storageClassName</th><th>Result</th></tr></thead>
+      <tbody id="pvBody"></tbody>
+    </table>
+    <div class="panel" id="pvVerdict" style="margin-top: 14px;"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">ConfigMaps &amp; Secrets</h3>
+    <p style="margin-top: 0;">A <span class="term" data-tip="A Kubernetes object holding non-sensitive configuration data, injected into Pods as environment variables or mounted files.">ConfigMap</span> holds ordinary config data. A <span class="term" data-tip="Same shape as a ConfigMap, but intended for sensitive values -- API keys, passwords, certificates. Stored base64-encoded, not encrypted, unless the cluster separately configures encryption at rest.">Secret</span> holds the same shape of data, but for sensitive values — and access to it is restricted via <a href="policy-security.html">RBAC</a>.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Secrets are base64, not encrypted, by default.</strong> Anyone who can read the Secret object — or an unencrypted etcd backup — can trivially decode it. Base64 is an encoding, not a cipher; real protection needs encryption at rest configured separately.</li>
+      <li style="margin-bottom: 6px;"><strong>Dynamically provisioned volumes often default to a Delete reclaim policy.</strong> Deleting the PVC can silently delete the underlying data too — unlike many hand-provisioned PVs, which commonly default to Retain.</li>
+      <li style="margin-bottom: 6px;"><strong>ConfigMap/Secret changes don't automatically restart Pods.</strong> A mounted file may update eventually; env-var-injected values are frozen at container start. Teams often add a checksum annotation or a tool like Reloader to force a rollout when config actually changes.</li>
+      <li><strong><span class="mono">emptyDir</span> doesn't survive eviction or rescheduling.</strong> It's tied to the Pod's lifetime on that specific node — use a PVC for anything that needs to outlive the Pod itself.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="workloads-scheduling.html">← Previous: Workloads &amp; Scheduling</a>
+    <a href="policy-security.html">Next: Policy &amp; Security →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var pvs = [
+    { name: "pv-001", capacity: 5, storageClass: "" },
+    { name: "pv-002", capacity: 10, storageClass: "standard" },
+    { name: "pv-003", capacity: 10, storageClass: "fast-ssd" }
+  ];
+
+  var pvcSize = document.getElementById("pvcSize");
+  var pvcClass = document.getElementById("pvcClass");
+  var pvBody = document.getElementById("pvBody");
+  var pvVerdict = document.getElementById("pvVerdict");
+
+  function evaluate() {
+    var size = parseInt(pvcSize.value, 10) || 0;
+    var cls = pvcClass.value;
+
+    pvBody.innerHTML = "";
+    var match = null;
+    pvs.forEach(function (pv) {
+      var matches = pv.storageClass === cls && pv.capacity >= size;
+      if (matches && !match) match = pv;
+      var tr = document.createElement("tr");
+      tr.className = matches ? "pv-match" : "pv-nomatch";
+      tr.innerHTML =
+        "<td>" + pv.name + "</td><td>" + pv.capacity + "Gi</td><td class=\"mono\">" +
+        (pv.storageClass || "(none)") + "</td><td>" + (matches ? "Bound" : "Not eligible") + "</td>";
+      pvBody.appendChild(tr);
+    });
+
+    if (match) {
+      pvVerdict.innerHTML = "<strong>Bound to " + match.name + "</strong> — an existing PersistentVolume already satisfies this claim.";
+    } else if (cls) {
+      pvVerdict.innerHTML = "<strong>No static PV matches — dynamically provisioned instead.</strong> The \"" + cls + "\" StorageClass's provisioner creates a brand-new " + size + "Gi PersistentVolume on demand to satisfy this claim.";
+    } else {
+      pvVerdict.innerHTML = "<strong>Pending.</strong> No existing PersistentVolume matches, and no StorageClass was specified to dynamically provision one.";
+    }
+  }
+
+  pvcSize.addEventListener("input", evaluate);
+  pvcClass.addEventListener("change", evaluate);
+  evaluate();
+})();
+</script>
+</body>
+</html>

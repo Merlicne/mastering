@@ -1,53 +1,36 @@
 (function () {
-  var subjects = {
-    networking: {
-      groups: [
-        {
-          name: "Foundations",
-          items: [
-            { href: "index.html", label: "Home" },
-            { href: "osi-layers.html", label: "OSI / TCP-IP" },
-            { href: "subnetting.html", label: "Subnetting" },
-            { href: "tcp-handshake.html", label: "TCP Handshake" },
-            { href: "dns-resolution.html", label: "DNS Resolution" },
-            { href: "linux-networking.html", label: "Linux Netns" }
-          ]
-        },
-        {
-          name: "Deep Dives & Orchestration",
-          items: [
-            { href: "l3-routing.html", label: "L3 Routing" },
-            { href: "firewalls.html", label: "Firewalls" },
-            { href: "l4-tcp-udp.html", label: "L4 TCP/UDP" },
-            { href: "l7-protocols.html", label: "L7 HTTP+" },
-            { href: "container-networking.html", label: "Containers" },
-            { href: "kubernetes-networking.html", label: "Kubernetes" }
-          ]
-        }
-      ]
-    },
-    security: {
-      groups: [
-        {
-          name: "Security",
-          items: [
-            { href: "index.html", label: "Home" },
-            { href: "tls-handshake.html", label: "TLS Handshake" },
-            { href: "network-attacks.html", label: "Network Attacks" },
-            { href: "dns-security.html", label: "DNS Security" }
-          ]
-        }
-      ]
-    }
-  };
-
+  var content = window.CONTENT || [];
   var segments = location.pathname.split("/").filter(Boolean);
   var current = segments[segments.length - 1] || "index.html";
   // Current subject is the folder name directly above the current file, if
-  // that folder name is a key in `subjects` -- e.g. ".../networking/foo.html".
-  var subjectKey = segments.length >= 2 ? segments[segments.length - 2] : null;
-  var subject = subjectKey && subjects[subjectKey] ? subjects[subjectKey] : null;
-  var brandPrefix = subject ? "../" : "";
+  // any CONTENT entries live there -- e.g. ".../networking/foo.html".
+  var folder = segments.length >= 2 ? segments[segments.length - 2] : null;
+
+  var folderItems = folder
+    ? content.filter(function (entry) { return entry.path.indexOf(folder + "/") === 0; })
+    : [];
+  var isSubject = folderItems.length > 0;
+  var brandPrefix = isSubject ? "../" : "";
+
+  function buildGroups() {
+    var groups = [];
+    var byName = {};
+    folderItems.forEach(function (entry) {
+      var name = entry.group || "";
+      if (!byName[name]) {
+        byName[name] = { name: name, items: [] };
+        groups.push(byName[name]);
+      }
+      byName[name].items.push({ href: entry.path.slice(folder.length + 1), label: entry.navLabel });
+    });
+    // The current folder's own index.html isn't in CONTENT -- synthesize a
+    // "Home" link as the first item of the first group, same spot it held
+    // when this nav was hardcoded per subject.
+    if (groups.length > 0) {
+      groups[0].items.unshift({ href: "index.html", label: "Home" });
+    }
+    return groups;
+  }
 
   function renderGroup(group) {
     var itemsHtml = group.items
@@ -59,8 +42,8 @@
     return '<span class="site-nav-group-label">' + group.name + "</span>" + itemsHtml;
   }
 
-  var linksHtml = subject
-    ? '<div class="site-nav-links">' + subject.groups.map(renderGroup).join('<span class="site-nav-divider"></span>') + "</div>"
+  var linksHtml = isSubject
+    ? '<div class="site-nav-links">' + buildGroups().map(renderGroup).join('<span class="site-nav-divider"></span>') + "</div>"
     : "";
 
   var nav = document.createElement("nav");

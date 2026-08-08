@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workloads &amp; Scheduling — Kubernetes — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .workload-explorer { display: grid; grid-template-columns: 200px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .workload-explorer { grid-template-columns: 1fr; } }
+  .workload-list { display: flex; flex-direction: column; gap: 6px; }
+  .workload-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .workload-btn:hover { border-color: var(--accent); }
+  .workload-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .rollout-bars { display: flex; flex-direction: column; gap: 10px; margin: 16px 0; }
+  .rollout-bar-row { display: flex; align-items: center; gap: 10px; }
+  .rollout-bar-label { flex: 0 0 90px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.82rem; }
+  .rollout-bar-track { flex: 1; display: flex; gap: 3px; }
+  .rollout-cell { flex: 1; height: 26px; border-radius: 4px; background: var(--code-bg); border: 1px solid var(--code-border); }
+  .rollout-cell.v1 { background: var(--accent-2); border-color: var(--accent-2); }
+  .rollout-cell.v2 { background: var(--accent); border-color: var(--accent); }
+
+  tr.sched-pass td:first-child { font-weight: 700; }
+  tr.sched-fail { opacity: 0.5; }
+  tr.sched-winner { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .step-text { min-height: 3em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 3 of 6</span>
+    <h1>Workloads &amp; Scheduling</h1>
+    <p>Once the <a href="architecture.html">control plane</a> and a <a href="node-components.html">node</a> can run a container, the next questions are: which higher-level object should describe what you actually want running, and how does the scheduler decide where each Pod lands?</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Workload types: which one for which job</h3>
+    <div class="workload-explorer">
+      <div class="workload-list" id="workloadList"></div>
+      <div class="workload-detail-panel" id="workloadDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Rolling updates: changing versions without downtime</h3>
+    <p style="margin-top: 0;">A Deployment doesn't edit Pods in place — it creates a new ReplicaSet for the new version and shifts replica counts between old and new, governed by <span class="term" data-tip="The maximum number of Pods that can be created above the desired replica count during a rollout, temporarily using extra capacity to roll out faster without reducing availability.">maxSurge</span> and <span class="term" data-tip="The maximum number of Pods that can be unavailable during a rollout, guaranteeing at least (desired - maxUnavailable) Pods stay up and serving the whole time.">maxUnavailable</span>.</p>
+    <div class="rollout-bars">
+      <div class="rollout-bar-row"><div class="rollout-bar-label">v1 (old)</div><div class="rollout-bar-track" id="v1Track"></div></div>
+      <div class="rollout-bar-row"><div class="rollout-bar-label">v2 (new)</div><div class="rollout-bar-track" id="v2Track"></div></div>
+    </div>
+    <div class="panel" id="rolloutText"></div>
+    <div class="controls">
+      <button class="btn" id="rolloutResetBtn">⟲ Reset</button>
+      <button class="btn btn-primary" id="rolloutNextBtn">Next step ▶</button>
+      <span class="step-counter" id="rolloutStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">How the scheduler picks a node: filter, then score</h3>
+    <p style="margin-top: 0;">Pod needs: 2 CPU, 4Gi memory, <span class="mono">nodeSelector: disktype=ssd</span>.</p>
+    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px; font-size: 0.9rem;">
+      <input type="checkbox" id="tolerationToggle"> Pod tolerates the <span class="mono">dedicated=gpu:NoSchedule</span> taint
+    </label>
+    <table>
+      <thead><tr><th>Node</th><th>Available CPU / Memory</th><th>Labels</th><th>Taints</th><th>Filter result</th><th>Score</th></tr></thead>
+      <tbody id="schedBody"></tbody>
+    </table>
+    <div class="panel" id="schedVerdict" style="margin-top: 14px;"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Taints, tolerations, and affinity point in different directions</h3>
+    <table>
+      <thead><tr><th>Mechanism</th><th>Lives on</th><th>Effect</th></tr></thead>
+      <tbody>
+        <tr><td><span class="term" data-tip="Applied to a node. Repels Pods from that node unless they explicitly tolerate it.">Taint</span> + <span class="term" data-tip="Applied to a Pod. Permits (but does not force) scheduling onto a node with a matching taint.">toleration</span></td><td>Node / Pod</td><td><strong>Repels</strong> — permits scheduling there, doesn't attract anything</td></tr>
+        <tr><td><span class="term" data-tip="Applied to a Pod. Prefers or requires nodes with certain labels.">Node affinity</span></td><td>Pod</td><td><strong>Attracts</strong> toward nodes with matching labels</td></tr>
+        <tr><td><span class="term" data-tip="Applied to a Pod. Prefers or requires placement relative to other already-running Pods, not node labels.">Pod affinity / anti-affinity</span></td><td>Pod</td><td><strong>Attracts or repels</strong> relative to other Pods, e.g. spreading replicas across nodes</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;"><span class="term" data-tip="What the scheduler guarantees is reserved for the container -- used during filtering, above. A limit is a hard ceiling enforced at runtime instead.">Resource requests</span> and <span class="term" data-tip="A hard ceiling enforced at runtime. Exceeding a CPU limit throttles the container; exceeding a memory limit gets it OOMKilled.">limits</span> matter here too: requests are what the filter stage checks against available capacity; limits are enforced later, while the container is actually running.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>A toleration doesn't attract a Pod to a tainted node.</strong> It only permits scheduling there — if you actually want a Pod to prefer that node, you still need affinity too.</li>
+      <li style="margin-bottom: 6px;"><strong>Exceeding a CPU limit throttles; exceeding a memory limit kills.</strong> This asymmetry catches people who assume both resource types behave the same way under pressure.</li>
+      <li style="margin-bottom: 6px;"><strong>Deployments don't guarantee ordering; StatefulSets do.</strong> Swapping one for the other because "it's basically the same" breaks anything relying on stable per-replica identity or ordered startup/shutdown.</li>
+      <li><strong>DaemonSets don't compete for "the best" node.</strong> They intentionally bypass normal resource-based scoring — the point is to run on every matching node, not the optimal one.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="node-components.html">← Previous: Node Components &amp; Container Runtime</a>
+    <a href="storage-config.html">Next: Storage &amp; Configuration →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Workload type explorer ----------------
+  var workloads = [
+    { name: "Pod", desc: "The smallest deployable unit — one or more containers sharing network and storage namespaces (see the pause container on the Node Components page). Rarely created directly; almost always managed by one of the objects below." },
+    { name: "ReplicaSet", desc: "Ensures N identical, interchangeable replicas of a Pod template are running. If one dies, it's replaced with a brand-new Pod — new identity, new IP, no memory of the old one." },
+    { name: "Deployment", desc: "Manages ReplicaSets over time, enabling rolling updates and rollbacks by creating a new ReplicaSet and gradually shifting replica counts from the old one to the new one — see the rollout demo below." },
+    { name: "StatefulSet", desc: "Like a Deployment, but each replica gets a stable, unique identity (name-0, name-1, ...) and its own persistent storage that follows it across rescheduling, created and deleted in order. Use it for anything that cares which replica it is — databases, anything needing a stable network identity." },
+    { name: "DaemonSet", desc: "Ensures exactly one matching Pod runs on every node (or a selected subset) — used for node-level agents like log collectors, monitoring agents, or CNI plugins themselves." },
+    { name: "Job", desc: "Runs Pods to completion rather than forever — for batch or one-off tasks, retrying on failure up to a configured limit." },
+    { name: "CronJob", desc: "Creates Jobs on a schedule, using the same syntax as cron." }
+  ];
+
+  var workloadList = document.getElementById("workloadList");
+  var workloadDetail = document.getElementById("workloadDetail");
+
+  function renderWorkloadDetail(w) {
+    workloadDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + w.name + "</h4><p>" + w.desc + "</p>";
+  }
+  workloads.forEach(function (w, idx) {
+    var btn = document.createElement("button");
+    btn.className = "workload-btn" + (idx === 2 ? " selected" : "");
+    btn.textContent = w.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(workloadList.children, function (el) { el.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderWorkloadDetail(w);
+    });
+    workloadList.appendChild(btn);
+  });
+  renderWorkloadDetail(workloads[2]);
+
+  // ---------------- Rolling update demo ----------------
+  var TOTAL = 4;
+  var rolloutSteps = [
+    { v1: 4, v2: 0, text: "Starting state: 4 replicas of v1, 0 of v2." },
+    { v1: 4, v2: 1, text: "maxSurge=1 allows creating 1 extra v2 Pod before removing any v1 — briefly 5 total Pods." },
+    { v1: 3, v2: 1, text: "Once that v2 Pod passes its readiness probe, 1 v1 Pod is removed. 4 total again, availability never dropped." },
+    { v1: 3, v2: 2, text: "Another v2 Pod is created (still within maxSurge=1 relative to the 4 desired)." },
+    { v1: 2, v2: 2, text: "Another v1 Pod is removed once the new one is ready." },
+    { v1: 2, v2: 3, text: "Repeat..." },
+    { v1: 1, v2: 3, text: "Almost there." },
+    { v1: 1, v2: 4, text: "One more v2 Pod created." },
+    { v1: 0, v2: 4, text: "Last v1 Pod removed. Rollout complete: 4/4 replicas now on v2, and availability never dropped below 3 the entire time." }
+  ];
+
+  var v1Track = document.getElementById("v1Track");
+  var v2Track = document.getElementById("v2Track");
+  var rolloutText = document.getElementById("rolloutText");
+  var rolloutStepCounter = document.getElementById("rolloutStepCounter");
+  var rolloutNextBtn = document.getElementById("rolloutNextBtn");
+  var rolloutResetBtn = document.getElementById("rolloutResetBtn");
+  var rolloutIndex = 0;
+
+  function renderBars(count, cls, track) {
+    track.innerHTML = "";
+    for (var i = 0; i < TOTAL + 1; i++) {
+      var cell = document.createElement("div");
+      cell.className = "rollout-cell" + (i < count ? " " + cls : "");
+      track.appendChild(cell);
+    }
+  }
+
+  function renderRollout() {
+    var step = rolloutSteps[rolloutIndex];
+    renderBars(step.v1, "v1", v1Track);
+    renderBars(step.v2, "v2", v2Track);
+    rolloutText.textContent = step.text;
+    rolloutStepCounter.textContent = "Step " + (rolloutIndex + 1) + " / " + rolloutSteps.length;
+    rolloutNextBtn.disabled = rolloutIndex === rolloutSteps.length - 1;
+  }
+
+  rolloutNextBtn.addEventListener("click", function () { if (rolloutIndex < rolloutSteps.length - 1) { rolloutIndex++; renderRollout(); } });
+  rolloutResetBtn.addEventListener("click", function () { rolloutIndex = 0; renderRollout(); });
+  renderRollout();
+
+  // ---------------- Scheduler filter/score demo ----------------
+  var nodes = [
+    { name: "node-a", cpu: 4, mem: 8, disktype: "ssd", taint: null },
+    { name: "node-b", cpu: 1, mem: 2, disktype: "ssd", taint: null },
+    { name: "node-c", cpu: 8, mem: 16, disktype: "hdd", taint: null },
+    { name: "node-d", cpu: 8, mem: 16, disktype: "ssd", taint: "dedicated=gpu:NoSchedule" },
+    { name: "node-e", cpu: 6, mem: 12, disktype: "ssd", taint: null }
+  ];
+  var POD_CPU = 2, POD_MEM = 4;
+
+  var tolerationToggle = document.getElementById("tolerationToggle");
+  var schedBody = document.getElementById("schedBody");
+  var schedVerdict = document.getElementById("schedVerdict");
+
+  function evaluateScheduling() {
+    var tolerates = tolerationToggle.checked;
+    schedBody.innerHTML = "";
+    var passing = [];
+
+    nodes.forEach(function (n) {
+      var reasons = [];
+      if (n.cpu < POD_CPU || n.mem < POD_MEM) reasons.push("insufficient resources");
+      if (n.disktype !== "ssd") reasons.push("nodeSelector mismatch (disktype)");
+      if (n.taint && !tolerates) reasons.push("untolerated taint");
+      var passes = reasons.length === 0;
+      var score = passes ? (n.cpu + n.mem) : null;
+      if (passes) passing.push({ node: n, score: score });
+
+      var tr = document.createElement("tr");
+      tr.className = passes ? "sched-pass" : "sched-fail";
+      tr.innerHTML =
+        "<td>" + n.name + "</td>" +
+        "<td class=\"mono\">" + n.cpu + " / " + n.mem + "Gi</td>" +
+        "<td class=\"mono\">disktype=" + n.disktype + "</td>" +
+        "<td class=\"mono\">" + (n.taint || "none") + "</td>" +
+        "<td>" + (passes ? "<span class=\"badge badge-ok\">PASS</span>" : "<span class=\"badge badge-danger\">FAIL</span> " + reasons.join(", ")) + "</td>" +
+        "<td>" + (score !== null ? score : "—") + "</td>";
+      tr._node = n.name;
+      schedBody.appendChild(tr);
+    });
+
+    if (passing.length === 0) {
+      schedVerdict.textContent = "No node passes filtering — the Pod stays Pending.";
+      return;
+    }
+    passing.sort(function (a, b) { return b.score - a.score; });
+    var winner = passing[0];
+    Array.prototype.forEach.call(schedBody.children, function (tr) {
+      if (tr._node === winner.node.name) tr.className = "sched-winner";
+    });
+    schedVerdict.innerHTML = "<strong>Winner: " + winner.node.name + "</strong> (score " + winner.score + ") — passed filtering along with " + (passing.length - 1) + " other node(s), and had the most available resources of those that qualified.";
+  }
+
+  tolerationToggle.addEventListener("change", evaluateScheduling);
+  evaluateScheduling();
+})();
+</script>
+</body>
+</html>

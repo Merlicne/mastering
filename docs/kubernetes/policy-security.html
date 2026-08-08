@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Policy &amp; Security — Kubernetes — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .rbac-form { display: flex; gap: 14px; flex-wrap: wrap; margin: 14px 0; align-items: flex-end; }
+  .rbac-form .field { display: flex; flex-direction: column; gap: 6px; }
+  .rbac-form .field label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .rbac-form select { width: 140px; }
+  .verdict-box { margin-top: 12px; padding: 14px 16px; border-radius: 8px; font-weight: 700; text-align: center; }
+  .verdict-box.allow { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
+  .verdict-box.deny { background: color-mix(in srgb, var(--text-muted) 15%, transparent); color: var(--text-muted); }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 5 of 6</span>
+    <h1>Policy &amp; Security</h1>
+    <p>"Policy" in Kubernetes spans several independent layers: who can do what (RBAC), how privileged a Pod is allowed to be, how much a namespace can consume in aggregate, and a final checkpoint before anything is persisted. This page covers all of them except <a href="../networking/kubernetes-networking.html">NetworkPolicy</a>, which already has its own page in the Networking subject.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">RBAC: purely additive, no explicit deny</h3>
+    <p style="margin-top: 0;"><span class="term" data-tip="Role-Based Access Control -- grants permissions (verbs on resources) to users, groups, or service accounts via Roles/ClusterRoles bound with RoleBindings/ClusterRoleBindings.">RBAC</span> works by accumulating grants: a <span class="term" data-tip="A set of permissions (verbs like get/list/create/delete on resources like pods/deployments) scoped to one namespace. A ClusterRole is the same idea, but cluster-wide.">Role</span> or ClusterRole lists what's allowed, and a <span class="term" data-tip="Grants a Role or ClusterRole to a specific user, group, or service account.">RoleBinding</span> or ClusterRoleBinding hands it to someone. There is no explicit deny rule anywhere in the model — this is exactly the same "allow-only" shape as cloud security groups from the <a href="../networking/firewalls.html">Firewalls</a> page.</p>
+
+    <div class="rbac-form">
+      <div class="field"><label for="rbacIdentity">Identity</label>
+        <select id="rbacIdentity"><option value="alice">alice</option><option value="bob">bob</option><option value="ci-bot">ci-bot (ServiceAccount)</option></select>
+      </div>
+      <div class="field"><label for="rbacVerb">Verb</label>
+        <select id="rbacVerb"><option value="get">get</option><option value="list">list</option><option value="create">create</option><option value="update">update</option><option value="delete">delete</option></select>
+      </div>
+      <div class="field"><label for="rbacResource">Resource</label>
+        <select id="rbacResource"><option value="pods">pods</option><option value="deployments">deployments</option><option value="secrets">secrets</option></select>
+      </div>
+      <div class="field"><label for="rbacNamespace">Namespace</label>
+        <select id="rbacNamespace"><option value="default">default</option><option value="staging">staging</option><option value="kube-system">kube-system</option></select>
+      </div>
+    </div>
+
+    <table>
+      <thead><tr><th>Identity</th><th>Role</th><th>Namespace</th><th>Verbs</th><th>Resources</th></tr></thead>
+      <tbody>
+        <tr><td>alice</td><td>view</td><td>* (cluster-wide)</td><td class="mono">get, list, watch</td><td class="mono">pods, deployments, services, configmaps</td></tr>
+        <tr><td>bob</td><td>pod-manager</td><td class="mono">default</td><td class="mono">get, list, watch, create, delete</td><td class="mono">pods</td></tr>
+        <tr><td>ci-bot</td><td>deployer</td><td class="mono">staging</td><td class="mono">get, list, create, update</td><td class="mono">deployments</td></tr>
+      </tbody>
+    </table>
+    <div class="verdict-box" id="rbacVerdict"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Pod Security Admission: how privileged can a Pod be?</h3>
+    <p style="margin-top: 0;"><span class="term" data-tip="The built-in successor to the deprecated PodSecurityPolicy. Enforces one of three standards on a namespace via labels, rather than a separate cluster-wide policy object.">Pod Security Admission</span> enforces one of three standards, applied by labeling a <em>namespace</em> — not individual Pods:</p>
+    <table>
+      <thead><tr><th>Standard</th><th>What it allows</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">Privileged</td><td>No restrictions — full access to the host, if the Pod asks for it</td></tr>
+        <tr><td class="mono">Baseline</td><td>Blocks known privilege escalations, but stays broadly compatible with common workloads</td></tr>
+        <tr><td class="mono">Restricted</td><td>Heavily hardened — must run as non-root, no privilege escalation, seccomp required</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">ResourceQuota &amp; LimitRange</h3>
+    <table>
+      <thead><tr><th>Object</th><th>Scope</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td><span class="term" data-tip="Caps the aggregate resource consumption or object count for an entire namespace.">ResourceQuota</span></td><td>Whole namespace, in aggregate</td><td>"At most 20 Pods and 10 CPU cores requested, total, in this namespace"</td></tr>
+        <tr><td><span class="term" data-tip="Sets default, minimum, and maximum resource constraints for individual objects within a namespace.">LimitRange</span></td><td>Individual objects</td><td>"Every container gets 100m CPU by default if unspecified; no container may request more than 2 CPU"</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Admission controllers &amp; webhooks: the last checkpoint before etcd</h3>
+    <p style="margin-top: 0;">This is the same stage from <a href="architecture.html">Architecture's "life of a kubectl apply"</a> step-through: after authentication and RBAC authorization, every request runs through <span class="term" data-tip="An admission webhook that can modify (mutate) an incoming object before it's persisted -- e.g. automatically injecting a sidecar container.">mutating admission webhooks</span> first, then <span class="term" data-tip="An admission webhook that can only accept or reject an object -- no modification. Runs after mutation so it always sees the final shape of the object.">validating admission webhooks</span>. Order is deliberate: by the time validation runs, the object already reflects every mutation, so validators always see its final shape. General-purpose policy engines like OPA/Gatekeeper and Kyverno plug in at exactly this point.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>RBAC has no explicit deny.</strong> The only way to restrict something already granted broadly is to not grant it that broadly in the first place — not to add a deny rule on top, because there isn't one.</li>
+      <li style="margin-bottom: 6px;"><strong><span class="mono">cluster-admin</span> is extremely powerful and often over-granted.</strong> Binding it to a service account "just to get something working" is one of the most common real-world RBAC mistakes — there's no way to partially revoke pieces of it later.</li>
+      <li style="margin-bottom: 6px;"><strong>Pod Security Admission is opt-in per namespace.</strong> A brand-new namespace has no enforcement at all until someone remembers to label it — there's no cluster-wide default that silently protects every namespace.</li>
+      <li><strong>A ResourceQuota can suddenly start rejecting Pod creation.</strong> Once a namespace's quota covers compute resources, every Pod in it must specify requests/limits or be rejected outright — this surprises teams that never had to specify these before the quota existed.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="storage-config.html">← Previous: Storage &amp; Configuration</a>
+    <a href="extensibility.html">Next: Extensibility &amp; Ecosystem →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var bindings = {
+    alice: [{ role: "view", namespace: "*", verbs: ["get", "list", "watch"], resources: ["pods", "deployments", "services", "configmaps"] }],
+    bob: [{ role: "pod-manager", namespace: "default", verbs: ["get", "list", "watch", "create", "delete"], resources: ["pods"] }],
+    "ci-bot": [{ role: "deployer", namespace: "staging", verbs: ["get", "list", "create", "update"], resources: ["deployments"] }]
+  };
+
+  var rbacIdentity = document.getElementById("rbacIdentity");
+  var rbacVerb = document.getElementById("rbacVerb");
+  var rbacResource = document.getElementById("rbacResource");
+  var rbacNamespace = document.getElementById("rbacNamespace");
+  var rbacVerdict = document.getElementById("rbacVerdict");
+
+  function evaluate() {
+    var identity = rbacIdentity.value;
+    var verb = rbacVerb.value;
+    var resource = rbacResource.value;
+    var namespace = rbacNamespace.value;
+
+    var grants = bindings[identity] || [];
+    var matched = grants.find(function (b) {
+      var nsOk = b.namespace === "*" || b.namespace === namespace;
+      var resOk = b.resources.indexOf(resource) !== -1;
+      var verbOk = b.verbs.indexOf(verb) !== -1;
+      return nsOk && resOk && verbOk;
+    });
+
+    if (matched) {
+      rbacVerdict.className = "verdict-box allow";
+      rbacVerdict.textContent = "ALLOWED — granted by the \"" + matched.role + "\" role.";
+    } else {
+      rbacVerdict.className = "verdict-box deny";
+      rbacVerdict.textContent = "DENIED — no binding grants \"" + verb + "\" on \"" + resource + "\" in \"" + namespace + "\" for " + identity + ".";
+    }
+  }
+
+  [rbacIdentity, rbacVerb, rbacResource, rbacNamespace].forEach(function (el) {
+    el.addEventListener("change", evaluate);
+  });
+  evaluate();
+})();
+</script>
+</body>
+</html>

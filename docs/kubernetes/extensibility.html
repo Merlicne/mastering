@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Extensibility &amp; Ecosystem — Kubernetes — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .diagram { display: flex; flex-direction: column; gap: 16px; padding: 10px 4px; min-height: 40px; }
+  .hop-row { display: flex; align-items: center; gap: 10px; }
+  .hop-node { flex: 0 0 auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+  .hop-line { flex: 1; position: relative; height: 2px; background: var(--accent); margin: 18px 4px 0; }
+  .hop-line::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .step-text { min-height: 3em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 6 of 6</span>
+    <h1>Extensibility &amp; Ecosystem</h1>
+    <p>Everything so far has been built-in Kubernetes. This page covers how the API and its patterns get extended, and how the ecosystem packages and customizes what you deploy.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">CRDs: extending the API itself</h3>
+    <p style="margin-top: 0;">A <span class="term" data-tip="Custom Resource Definition -- registers a brand-new object type with the API server, which then stores and serves it exactly like a built-in Pod or Deployment.">CRD</span> lets you define your own object type — say, <span class="mono">PostgresCluster</span> — that the API server will happily store and serve. On its own, a CRD is inert: creating an instance of it is barely more than writing a row in a database. Nothing happens until something is watching it.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Operators: the reconciliation loop, for your own resource</h3>
+    <p style="margin-top: 0;">An <span class="term" data-tip="A CRD plus a custom controller that watches instances of it and reconciles real-world state to match what's declared -- encoding operational knowledge (how to run, scale, back up a specific piece of software) as code.">Operator</span> is a CRD plus a controller that watches it and reconciles reality to match — the exact same loop from <a href="architecture.html">Architecture's reconciliation-loop explainer</a>, just applied to a resource you invented instead of a built-in one like ReplicaSet.</p>
+
+    <div class="diagram" id="opDiagram"></div>
+    <div class="panel step-text" id="opStepText" style="margin-top: 6px;"></div>
+    <div class="controls">
+      <button class="btn" id="opResetBtn">⟲ Reset</button>
+      <button class="btn" id="opPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="opNextBtn">Next ▶</button>
+      <span class="step-counter" id="opStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Helm vs. Kustomize vs. raw manifests</h3>
+    <table>
+      <thead><tr><th>Approach</th><th>What it's for</th></tr></thead>
+      <tbody>
+        <tr><td>Raw manifests</td><td>Plain YAML, applied directly — full control, but repeats itself across environments</td></tr>
+        <tr><td><span class="term" data-tip="A template-free way to customize existing YAML: a base configuration plus per-environment patches, built into kubectl itself.">Kustomize</span></td><td>Environment-specific tweaks to existing manifests without duplicating whole files</td></tr>
+        <tr><td><span class="term" data-tip="A full templating engine and package manager for Kubernetes. A 'chart' bundles a whole application's manifests with configurable values, tracked as installable, upgradable, rollback-able releases.">Helm</span></td><td>Packaging and distributing a whole application, with configurable values and a release/rollback lifecycle</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">These solve overlapping but different problems — many real setups use both: Helm to install a chart, Kustomize to patch the result for a specific environment.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>A CRD without a controller does nothing.</strong> Creating the object is barely more than writing a database row — something needs to be watching and reconciling it, or it's inert.</li>
+      <li style="margin-bottom: 6px;"><strong>Helm charts can run arbitrary logic via hooks.</strong> Installing a chart from an untrusted source can execute code in your cluster, not just apply YAML — treat it like installing software, not configuration.</li>
+      <li style="margin-bottom: 6px;"><strong>Operators often carry broad RBAC permissions.</strong> To do their job (managing their resource across a namespace or cluster) they typically need wide-reaching access — a buggy or compromised Operator has a correspondingly large blast radius. See <a href="policy-security.html">Policy &amp; Security</a>.</li>
+      <li><strong>Kustomize and Helm aren't really competitors.</strong> One customizes existing YAML per environment; the other packages and distributes a whole application — plenty of real setups use both together.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="policy-security.html">← Previous: Policy &amp; Security</a>
+    <a href="index.html">Back to Kubernetes overview →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var steps = [
+    { from: "You", to: "API server", text: "You create a PostgresCluster object: replicas: 3, version: \"15\"." },
+    { from: "Operator", to: "API server (watch)", text: "The Postgres Operator, watching for PostgresCluster objects, notices this new one." },
+    { from: "Operator", to: "StatefulSet", text: "It creates a StatefulSet for the 3 ordered, stably-identified Postgres replicas — see Workloads & Scheduling." },
+    { from: "Operator", to: "Service", text: "It creates a Service so other workloads have a stable address to reach the primary — see Kubernetes Networking." },
+    { from: "Operator", to: "Secret", text: "It generates and stores database credentials as a Secret — see Storage & Configuration." },
+    { from: "Operator", to: "CronJob", text: "It creates a CronJob for scheduled backups — see Workloads & Scheduling." },
+    { from: "Operator", to: "API server (ongoing)", text: "It keeps watching afterward: if a replica dies, or you edit replicas to 5, the same reconciliation loop adjusts reality to match, indefinitely." }
+  ];
+
+  var diagram = document.getElementById("opDiagram");
+  var stepText = document.getElementById("opStepText");
+  var stepCounter = document.getElementById("opStepCounter");
+  var prevBtn = document.getElementById("opPrevBtn");
+  var nextBtn = document.getElementById("opNextBtn");
+  var resetBtn = document.getElementById("opResetBtn");
+  var stepIndex = 0;
+
+  function render() {
+    diagram.innerHTML = "";
+    for (var i = 0; i <= stepIndex; i++) {
+      var step = steps[i];
+      var row = document.createElement("div");
+      row.className = "hop-row";
+      row.innerHTML = '<div class="hop-node">' + step.from + "</div><div class=\"hop-line\"></div><div class=\"hop-node\">" + step.to + "</div>";
+      diagram.appendChild(row);
+    }
+    stepText.textContent = steps[stepIndex].text;
+    stepCounter.textContent = "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex === 0;
+    nextBtn.disabled = stepIndex === steps.length - 1;
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > 0) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", function () { stepIndex = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>

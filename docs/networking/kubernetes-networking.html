@@ -42,6 +42,7 @@
     <span class="eyebrow">Deep Dive · Orchestration</span>
     <h1>Kubernetes Networking</h1>
     <p>Kubernetes starts from one strict rule — the <span class="term" data-tip="Every Pod gets a real, cluster-routable IP. Any Pod can reach any other Pod's IP directly, without NAT, even across different nodes -- as if they were all on one flat LAN.">flat network model</span> — and everything else on this page (Services, Ingress, NetworkPolicy) exists to make that flat, wide-open network usable and safe at scale.</p>
+    <p style="font-size: 0.85rem; color: var(--text-muted);">This page covers Kubernetes networking specifically. For the rest of the platform — architecture, control plane, workloads, scheduling, storage, and policy — see the standalone <a href="../kubernetes/index.html">Kubernetes</a> subject.</p>
   </div>
 
   <div class="card">
@@ -160,6 +161,7 @@
   </div>
 </div>
 
+<script src="../content.js"></script>
 <script src="../js/nav.js"></script>
 <script src="../js/tooltip.js"></script>
 <script>

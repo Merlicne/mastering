@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Architecture &amp; Control Plane — Kubernetes — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .topo-row { display: flex; gap: 20px; margin: 16px 0; flex-wrap: wrap; }
+  .topo-box { flex: 1; min-width: 200px; border: 1px solid var(--border); border-radius: 10px; padding: 14px; background: var(--bg-elevated); }
+  .topo-title { font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); font-weight: 700; margin-bottom: 8px; }
+  .topo-chip { padding: 7px 10px; border-radius: 7px; background: var(--code-bg); border: 1px solid var(--code-border); font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; margin-bottom: 6px; }
+
+  .component-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .component-explorer { grid-template-columns: 1fr; } }
+  .component-list { display: flex; flex-direction: column; gap: 6px; }
+  .component-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .component-btn:hover { border-color: var(--accent); }
+  .component-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .diagram { display: flex; flex-direction: column; gap: 20px; padding: 10px 4px; min-height: 40px; }
+  .hop-row { display: flex; align-items: center; gap: 10px; }
+  .hop-node { flex: 0 0 auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+  .hop-line { flex: 1; position: relative; height: 2px; background: var(--accent); margin: 18px 4px 0; }
+  .hop-line::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .phase-note { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--accent-2); margin: 22px 0 4px; }
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 1 of 6</span>
+    <h1>Architecture &amp; Control Plane</h1>
+    <p>A Kubernetes cluster splits cleanly into two halves: a <span class="term" data-tip="The set of components that make cluster-wide decisions and store cluster state -- the API server, etcd, scheduler, and controller manager. Doesn't run your application workloads itself.">control plane</span> that makes decisions, and <span class="term" data-tip="A machine (VM or physical) that actually runs your containers, via kubelet, a container runtime, and kube-proxy.">worker nodes</span> that run your actual workloads. Nothing on this page runs your application — it's the machinery that decides where and how it runs.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Cluster topology</h3>
+    <p style="margin-top: 0;">Production clusters run the control plane on multiple machines for high availability: several API server replicas behind a load balancer, and an odd-numbered etcd cluster (3 or 5 members) so it can always establish a <span class="term" data-tip="A majority of members agreeing before a write is considered committed. An odd number avoids ties -- 3 members can lose 1 and keep a majority (2); 5 can lose 2.">quorum</span> even if a member is lost.</p>
+    <div class="topo-row">
+      <div class="topo-box">
+        <div class="topo-title">Control plane (×3 for HA)</div>
+        <div class="topo-chip">kube-apiserver</div>
+        <div class="topo-chip">etcd</div>
+        <div class="topo-chip">kube-scheduler</div>
+        <div class="topo-chip">kube-controller-manager</div>
+      </div>
+      <div class="topo-box">
+        <div class="topo-title">Worker nodes (as many as needed)</div>
+        <div class="topo-chip">kubelet</div>
+        <div class="topo-chip">kube-proxy</div>
+        <div class="topo-chip">container runtime</div>
+        <div class="topo-chip">your pods</div>
+      </div>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">Worker-node components get their own full page: see <a href="node-components.html">Node Components &amp; Container Runtime</a>.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The control plane components</h3>
+    <div class="component-explorer">
+      <div class="component-list" id="componentList"></div>
+      <div class="component-detail-panel" id="componentDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Life of a <span class="mono">kubectl apply</span></h3>
+    <p style="margin-top: 0;">Step through every component this page just introduced, working together on a single request.</p>
+    <div class="diagram" id="lifeDiagram"></div>
+    <div class="panel step-text" id="lifeStepText" style="margin-top: 6px;"></div>
+    <div class="controls">
+      <button class="btn" id="lifeResetBtn">⟲ Reset</button>
+      <button class="btn" id="lifePrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="lifeNextBtn">Next ▶</button>
+      <span class="step-counter" id="lifeStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The reconciliation loop: Kubernetes' one big idea</h3>
+    <p style="margin-top: 0;">Almost everything in Kubernetes, including every controller inside kube-controller-manager, runs the same loop: observe the actual state of the world, compare it to the desired state you declared, and take action to close the gap. Then do it again. This is what "<span class="term" data-tip="You declare what you want (3 replicas, this image, this config) rather than the steps to get there. A controller figures out the steps, continuously, forever.">declarative</span>" actually means in practice — and it's the exact same pattern <a href="extensibility.html">Operators</a> use for custom resources, just applied to Kubernetes' own built-in objects first.</p>
+    <p style="margin-top: 0;">Crucially, this loop is <strong>level-triggered, not edge-triggered</strong>: a controller doesn't rely on receiving every single change event in order. It just needs to look at current state whenever it wakes up and re-derive what to do — so a missed event doesn't cause permanent drift, the next pass fixes it anyway.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Losing etcd quorum doesn't just slow things down.</strong> With no majority available, no write can be committed at all — the cluster can go fully read-only, unable to schedule or change anything, even though existing pods keep running.</li>
+      <li style="margin-bottom: 6px;"><strong>The API server needs redundancy too, not just etcd.</strong> Every other component depends on reaching it, so HA control planes run multiple API server replicas behind a load balancer, not only a multi-member etcd cluster.</li>
+      <li style="margin-bottom: 6px;"><strong>Level-triggered reconciliation is a feature.</strong> It's tempting to think a controller needs perfect event delivery — it doesn't. It only needs to be able to look at the world and decide what to do, repeatedly.</li>
+      <li><strong>Nothing should talk to etcd directly except the API server.</strong> If troubleshooting ever leads you toward querying etcd by hand, that's usually a sign something upstream is already misconfigured — the API server is deliberately the only sanctioned path in.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <span></span>
+    <a href="node-components.html">Next: Node Components &amp; Container Runtime →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Control plane component explorer ----------------
+  var components = [
+    { name: "kube-apiserver", desc: "The only component that talks to etcd directly. Every other piece — kubectl, the scheduler, controllers, every kubelet — only ever talks to the API server, never to etcd or each other. It runs every request through authentication, then authorization (RBAC — see Policy & Security), then admission control, before persisting anything." },
+    { name: "etcd", desc: "A distributed, consistent key-value store using the Raft consensus algorithm. This is the cluster's single source of truth for every object's state. It needs an odd number of members so it can always compute a clear majority (quorum) for each write." },
+    { name: "kube-scheduler", desc: "Watches the API server for Pods with no assigned node, filters out nodes that can't run it (insufficient resources, taints, affinity rules), scores the remaining candidates, and binds the Pod to the winner. Full mechanics on the Workloads & Scheduling page." },
+    { name: "kube-controller-manager", desc: "Runs many independent controllers in one binary — the Node controller, ReplicaSet controller, Endpoints controller, and dozens more — each running its own reconciliation loop against a different kind of object." },
+    { name: "cloud-controller-manager", desc: "Splits cloud-provider-specific logic (provisioning load balancers, attaching cloud volumes, labeling nodes with cloud metadata) out of the core, so the rest of Kubernetes stays cloud-agnostic." }
+  ];
+
+  var componentList = document.getElementById("componentList");
+  var componentDetail = document.getElementById("componentDetail");
+
+  function renderComponentDetail(c) {
+    componentDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + c.name + "</h4><p>" + c.desc + "</p>";
+  }
+  components.forEach(function (c, idx) {
+    var btn = document.createElement("button");
+    btn.className = "component-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = c.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(componentList.children, function (el) { el.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderComponentDetail(c);
+    });
+    componentList.appendChild(btn);
+  });
+  renderComponentDetail(components[0]);
+
+  // ---------------- Life of a kubectl apply ----------------
+  var lifeSteps = [
+    { from: "kubectl", to: "API server", phase: "Request", text: "kubectl sends your manifest as an HTTPS request to the API server." },
+    { from: "API server", to: "Authentication", phase: "Request", text: "API server verifies who you are (client cert, token, etc.)." },
+    { from: "API server", to: "RBAC authorization", phase: "Request", text: "API server checks whether you're allowed to perform this action on this resource — see the Policy & Security page." },
+    { from: "API server", to: "Admission controllers", phase: "Request", text: "Mutating admission webhooks may modify the object, then validating webhooks may reject it outright — also covered on the Policy & Security page." },
+    { from: "API server", to: "etcd", phase: "Persistence", text: "The now-validated object is written to etcd." },
+    { from: "etcd", to: "etcd (majority)", phase: "Persistence", text: "etcd replicates the write to a majority of its members via Raft before acknowledging it as committed." },
+    { from: "kube-scheduler", to: "API server", phase: "Scheduling", text: "The scheduler, watching for unscheduled Pods, notices this new one and picks a node for it (filter, then score)." },
+    { from: "API server", to: "etcd", phase: "Scheduling", text: "The Pod object is updated with its assigned node and persisted again." },
+    { from: "kubelet", to: "container runtime", phase: "Execution", text: "The kubelet on that node, watching for Pods assigned to it, notices this one and starts creating it — see the Node Components page." },
+    { from: "Controllers", to: "Cluster state", phase: "Ongoing reconciliation", text: "Meanwhile, controllers keep reconciling continuously — e.g. the ReplicaSet controller compares desired vs. actual replica count and creates or deletes Pods to match, forever." }
+  ];
+
+  var lifeDiagram = document.getElementById("lifeDiagram");
+  var lifeStepText = document.getElementById("lifeStepText");
+  var lifeStepCounter = document.getElementById("lifeStepCounter");
+  var lifePrevBtn = document.getElementById("lifePrevBtn");
+  var lifeNextBtn = document.getElementById("lifeNextBtn");
+  var lifeResetBtn = document.getElementById("lifeResetBtn");
+  var lifeStepIndex = 0;
+
+  function renderLife() {
+    lifeDiagram.innerHTML = "";
+    var lastPhase = null;
+    for (var i = 0; i <= lifeStepIndex; i++) {
+      var step = lifeSteps[i];
+      if (step.phase !== lastPhase) {
+        var phaseEl = document.createElement("div");
+        phaseEl.className = "phase-note";
+        phaseEl.textContent = step.phase;
+        lifeDiagram.appendChild(phaseEl);
+        lastPhase = step.phase;
+      }
+      var row = document.createElement("div");
+      row.className = "hop-row";
+      row.innerHTML = '<div class="hop-node">' + step.from + "</div><div class=\"hop-line\"></div><div class=\"hop-node\">" + step.to + "</div>";
+      lifeDiagram.appendChild(row);
+    }
+    lifeStepText.textContent = lifeSteps[lifeStepIndex].text;
+    lifeStepCounter.textContent = "Step " + (lifeStepIndex + 1) + " / " + lifeSteps.length;
+    lifePrevBtn.disabled = lifeStepIndex === 0;
+    lifeNextBtn.disabled = lifeStepIndex === lifeSteps.length - 1;
+  }
+
+  lifePrevBtn.addEventListener("click", function () { if (lifeStepIndex > 0) { lifeStepIndex--; renderLife(); } });
+  lifeNextBtn.addEventListener("click", function () { if (lifeStepIndex < lifeSteps.length - 1) { lifeStepIndex++; renderLife(); } });
+  lifeResetBtn.addEventListener("click", function () { lifeStepIndex = 0; renderLife(); });
+  renderLife();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Node Components &amp; Container Runtime — Kubernetes — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .diagram { display: flex; flex-direction: column; gap: 20px; padding: 10px 4px; min-height: 40px; }
+  .hop-row { display: flex; align-items: center; gap: 10px; }
+  .hop-node { flex: 0 0 auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+  .hop-line { flex: 1; position: relative; height: 2px; background: var(--accent); margin: 18px 4px 0; }
+  .hop-line::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 2 of 6</span>
+    <h1>Node Components &amp; Container Runtime</h1>
+    <p>The <a href="architecture.html">Architecture page</a> covered the control plane's decisions. This page covers what actually turns those decisions into running containers on a worker node.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">kubelet: the node's agent</h3>
+    <p style="margin-top: 0;"><span class="term" data-tip="The agent that runs on every worker node. It's the only node component that talks to the API server on the control plane's behalf for that node.">kubelet</span> watches the API server for Pods assigned to its own node, and makes sure the containers described in each PodSpec are actually running — starting them if they're missing, restarting them if they crash, and reporting status back. It also runs three kinds of health checks:</p>
+    <table>
+      <thead><tr><th>Probe</th><th>On failure</th></tr></thead>
+      <tbody>
+        <tr><td><span class="term" data-tip="Checks whether a container is still working. Failure causes kubelet to restart the container.">Liveness probe</span></td><td>kubelet restarts the container</td></tr>
+        <tr><td><span class="term" data-tip="Checks whether a container is ready to receive traffic. Failure just removes it from a Service's endpoints -- the container keeps running.">Readiness probe</span></td><td>Removed from Service endpoints (see <a href="../networking/kubernetes-networking.html">Kubernetes Networking</a>) — container keeps running</td></tr>
+        <tr><td><span class="term" data-tip="Delays liveness/readiness checks until a slow-starting application finishes initializing, so it doesn't get killed for simply taking a while to boot.">Startup probe</span></td><td>Blocks the other two probes until it passes, protecting slow-starting apps</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The container runtime &amp; CRI</h3>
+    <p style="margin-top: 0;">kubelet doesn't create containers itself — it delegates to a <span class="term" data-tip="The software that actually pulls images and creates containers, e.g. containerd or CRI-O -- using the exact same Linux namespace and cgroup primitives from the Linux Networking page.">container runtime</span> through the <span class="term" data-tip="Container Runtime Interface -- a gRPC API kubelet uses to talk to any conforming runtime, so Kubernetes itself never needs to know which one you're running.">CRI</span>. This is the same namespace/cgroup machinery from <a href="../networking/linux-networking.html">Linux Networking</a> and <a href="../networking/container-networking.html">Container Networking</a> — Kubernetes doesn't invent a new isolation mechanism, it orchestrates the one Linux already provides.</p>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0;">Historical note: Kubernetes removed "dockershim" (its compatibility layer for Docker, which didn't speak CRI natively) in v1.24. Docker itself is built on containerd, so most workloads were unaffected — what disappeared was a compatibility shim, not the underlying engine.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The pause container: how a Pod shares one network namespace</h3>
+    <p style="margin-top: 0;">When a Pod is created, the runtime first creates an infrastructure container — often literally called "pause" — whose only job is to hold open the Pod's shared namespaces (network, and optionally others). Every other container in that Pod joins this same namespace instead of getting its own. That's the entire mechanism behind something you may have taken for granted: containers in the same Pod can reach each other over <span class="mono">localhost</span>, exactly like processes on the same machine.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">CRI, CSI, CNI: three plugin interfaces, three jobs</h3>
+    <table>
+      <thead><tr><th>Interface</th><th>Job</th><th>See also</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">CRI</td><td>Run containers (pull images, start/stop them)</td><td>This page</td></tr>
+        <tr><td class="mono">CSI</td><td>Attach and mount storage volumes</td><td><a href="storage-config.html">Storage &amp; Configuration</a></td></tr>
+        <tr><td class="mono">CNI</td><td>Wire up a Pod's networking</td><td><a href="../networking/kubernetes-networking.html">Kubernetes Networking</a></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Pod startup on a node, step by step</h3>
+    <div class="diagram" id="startupDiagram"></div>
+    <div class="panel step-text" id="startupStepText" style="margin-top: 6px;"></div>
+    <div class="controls">
+      <button class="btn" id="startupResetBtn">⟲ Reset</button>
+      <button class="btn" id="startupPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="startupNextBtn">Next ▶</button>
+      <span class="step-counter" id="startupStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>The pause container barely does anything — that's the point.</strong> Its entire job is to hold namespaces open so other containers can join them, even in the brief moment it's the only container running.</li>
+      <li style="margin-bottom: 6px;"><strong>Liveness and readiness failures have very different consequences.</strong> Confusing the two is a common way to accidentally restart a perfectly healthy container that's just temporarily busy — that container needed a readiness probe, not a liveness one.</li>
+      <li style="margin-bottom: 6px;"><strong>Removing dockershim didn't remove Docker's engine.</strong> It removed Kubernetes' compatibility layer for talking to Docker's non-CRI-native API — Docker itself runs on containerd underneath.</li>
+      <li><strong>kubelet only manages its own node.</strong> It never talks to other nodes' kubelets, and it makes no scheduling decisions — placement is entirely the scheduler's job, from the <a href="architecture.html">Architecture page</a>.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="architecture.html">← Previous: Architecture &amp; Control Plane</a>
+    <a href="workloads-scheduling.html">Next: Workloads &amp; Scheduling →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var steps = [
+    { from: "kubelet", to: "API server (watch)", text: "kubelet, watching the API server, notices a new Pod has been assigned to its node." },
+    { from: "kubelet", to: "Container runtime (CRI)", text: "kubelet asks the runtime to create a \"pod sandbox\" — this is what creates the pause container and its shared namespaces." },
+    { from: "kubelet", to: "CNI plugin", text: "kubelet calls the configured CNI plugin to wire up networking for that sandbox: assign an IP, set up the veth pair, attach it to the node's network." },
+    { from: "kubelet", to: "CSI plugin", text: "If the Pod references any volumes, kubelet ensures they're attached and mounted — via CSI for dynamically provisioned storage." },
+    { from: "kubelet", to: "Container runtime (CRI)", text: "kubelet asks the runtime to pull each container's image and start it inside the sandbox's shared namespaces." },
+    { from: "kubelet", to: "Probes", text: "kubelet begins running startup, liveness, and readiness probes against the now-running containers." },
+    { from: "kubelet", to: "API server", text: "kubelet reports the Pod's status (Running, Ready, etc.) back to the API server, where it becomes visible to kubectl and to controllers." }
+  ];
+
+  var diagram = document.getElementById("startupDiagram");
+  var stepText = document.getElementById("startupStepText");
+  var stepCounter = document.getElementById("startupStepCounter");
+  var prevBtn = document.getElementById("startupPrevBtn");
+  var nextBtn = document.getElementById("startupNextBtn");
+  var resetBtn = document.getElementById("startupResetBtn");
+  var stepIndex = 0;
+
+  function render() {
+    diagram.innerHTML = "";
+    for (var i = 0; i <= stepIndex; i++) {
+      var step = steps[i];
+      var row = document.createElement("div");
+      row.className = "hop-row";
+      row.innerHTML = '<div class="hop-node">' + step.from + "</div><div class=\"hop-line\"></div><div class=\"hop-node\">" + step.to + "</div>";
+      diagram.appendChild(row);
+    }
+    stepText.textContent = steps[stepIndex].text;
+    stepCounter.textContent = "Step " + (stepIndex + 1) + " / " + steps.length;
+    prevBtn.disabled = stepIndex === 0;
+    nextBtn.disabled = stepIndex === steps.length - 1;
+  }
+
+  prevBtn.addEventListener("click", function () { if (stepIndex > 0) { stepIndex--; render(); } });
+  nextBtn.addEventListener("click", function () { if (stepIndex < steps.length - 1) { stepIndex++; render(); } });
+  resetBtn.addEventListener("click", function () { stepIndex = 0; render(); });
+  render();
+})();
+</script>
+</body>
+</html>
