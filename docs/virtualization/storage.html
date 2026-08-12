@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Storage: Disk Images &amp; Snapshots — Virtualization — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .component-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .component-explorer { grid-template-columns: 1fr; } }
+  .component-list { display: flex; flex-direction: column; gap: 6px; }
+  .component-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .component-btn:hover { border-color: var(--accent); }
+  .component-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .chain-row { display: flex; align-items: stretch; gap: 10px; margin: 16px 0; flex-wrap: wrap; }
+  .chain-layer { flex: 1; min-width: 170px; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--bg-elevated); }
+  .chain-layer.current { border-color: var(--accent); }
+  .chain-layer h5 { margin: 0 0 8px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--text-muted); }
+  .chain-arrow { display: flex; align-items: center; color: var(--text-muted); font-size: 1.2rem; }
+  .block-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .block-btn {
+    width: 34px; height: 34px; border-radius: 6px; border: 1px solid var(--border); background: var(--code-bg);
+    font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; cursor: pointer; color: var(--text);
+  }
+  .block-btn.owned { background: color-mix(in srgb, var(--accent) 30%, transparent); border-color: var(--accent); font-weight: 700; }
+  .block-btn.queried { outline: 2px solid var(--accent-2); outline-offset: 1px; }
+  .resolve-trace { margin-top: 4px; }
+  .resolve-line { padding: 3px 0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem; }
+  .resolve-line .miss { color: var(--text-muted); }
+  .resolve-line .hit { color: var(--ok); font-weight: 700; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 5 of 6</span>
+    <h1>Storage: Disk Images &amp; Snapshots</h1>
+    <p>A VM's disk is, from the host's point of view, just a file (or a block device). How that file is structured determines whether snapshots are cheap or impossible, how much space an "empty" 40GB disk actually consumes, and how fast disk I/O really is.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">raw vs. qcow2</h3>
+    <div class="component-explorer">
+      <div class="component-list" id="formatList"></div>
+      <div class="component-detail-panel" id="formatDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Copy-on-write and backing files: how a read actually resolves</h3>
+    <p style="margin-top: 0;">A qcow2 snapshot doesn't copy the whole disk — it creates a new, initially-empty image that points at the previous one as its <span class="term" data-tip="The image a qcow2 file references for any block it hasn't written itself. Reads for unwritten blocks are transparently forwarded to the backing file; writes always go to the newest image, never the backing file.">backing file</span>. A write always lands in the newest image only; a read for a block the newest image hasn't touched falls through to its backing file, and keeps falling through the chain until it finds a layer that has that block. Click any block number in the current layer to see exactly how it resolves:</p>
+
+    <div class="chain-row">
+      <div class="chain-layer" id="layerBase">
+        <h5>Base image</h5>
+        <div class="block-grid" id="baseBlocks"></div>
+      </div>
+      <div class="chain-arrow">→</div>
+      <div class="chain-layer" id="layerA">
+        <h5>Snapshot A (backing: base)</h5>
+        <div class="block-grid" id="aBlocks"></div>
+      </div>
+      <div class="chain-arrow">→</div>
+      <div class="chain-layer current" id="layerB">
+        <h5>Snapshot B — current (backing: A)</h5>
+        <div class="block-grid" id="bBlocks"></div>
+      </div>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin: 4px 0 8px;">Highlighted blocks were written (modified) in that layer. Click a block number below to query it through the current layer:</p>
+    <div class="block-grid" id="queryBlocks" style="margin-bottom: 10px;"></div>
+    <div class="panel resolve-trace" id="resolveTrace"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Internal vs. external snapshots, and disk controllers</h3>
+    <table>
+      <thead><tr><th></th><th>Internal snapshot</th><th>External snapshot</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Where it lives</strong></td><td>Inside the same qcow2 file, as a point-in-time marker</td><td>A brand-new qcow2 file, backed by the previous one</td></tr>
+        <tr><td><strong>Live VM support</strong></td><td>Historically more limited</td><td>The modern, libvirt-preferred approach — works cleanly with a running VM</td></tr>
+        <tr><td><strong>Merging back</strong></td><td>Managed within one file</td><td>Requires an explicit "commit" or "blockcommit" to fold layers back down</td></tr>
+      </tbody>
+    </table>
+    <table style="margin-top: 16px;">
+      <thead><tr><th>Controller</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">virtio-blk</td><td>Simpler, slightly lower per-request overhead; each disk is its own PCI device, so there's a practical limit on how many you can attach.</td></tr>
+        <tr><td class="mono">virtio-scsi</td><td>A full SCSI stack over virtio — one controller can address many disks (LUNs), supports features plain virtio-blk doesn't (like SCSI passthrough), and is generally preferred for VMs needing more than a handful of disks.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>A snapshot is not a backup.</strong> It's stored as a delta on the same physical storage as the disk it's based on — if that underlying storage fails, the snapshot and its base both go with it. Backups need to leave the host entirely.</li>
+      <li style="margin-bottom: 6px;"><strong>Backing-file chains are fragile.</strong> Moving, renaming, or deleting a base image breaks every snapshot built on top of it — qcow2 files reference their backing file by path (or a stored identifier), not by an independent, portable link.</li>
+      <li style="margin-bottom: 6px;"><strong>Thin provisioning can run out of space unexpectedly.</strong> A qcow2 file allocated for a 100GB virtual disk starts small and grows as blocks are written — if several thin-provisioned VMs are overcommitted the same way <a href="memory-virtualization.html">memory can be</a>, the host can run out of real disk space even though every individual VM reports plenty free.</li>
+      <li><strong>qcow2's extra bookkeeping (copy-on-write, snapshots, compression) costs raw performance.</strong> For workloads where you'll never use snapshots and want the smallest possible I/O overhead, a raw image or a raw block device is measurably faster — the tradeoff is losing qcow2's flexibility entirely.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="device-io.html">← Previous: Device &amp; I/O Virtualization</a>
+    <a href="qemu-libvirt-practice.html">Next: QEMU &amp; libvirt in Practice →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- raw vs qcow2 explorer ----------------
+  var formats = [
+    { name: "raw", desc: "The disk contents laid out byte-for-byte, exactly as a physical disk would be — no header, no metadata, no format-specific features at all. Simplest possible format, and the fastest since there's zero translation overhead between a guest block address and a host file offset. But it has no built-in copy-on-write, no snapshots, and (on most filesystems) needs to be explicitly created as a sparse file to avoid allocating its full size immediately." },
+    { name: "qcow2", desc: "QEMU's native copy-on-write format ('QEMU Copy-On-Write, version 2'). Supports internal snapshots, backing files/chains, optional compression and encryption, and thin provisioning by default — the file only grows as data is actually written. This flexibility costs some performance versus raw, since every access goes through an extra layer of qcow2's own block-address translation table. It's the default for a reason: most of what makes this whole page interesting (snapshots, backing chains) is a qcow2 feature." }
+  ];
+
+  var formatList = document.getElementById("formatList");
+  var formatDetail = document.getElementById("formatDetail");
+
+  function renderFormatDetail(f) {
+    formatDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + f.name + "</h4><p>" + f.desc + "</p>";
+  }
+  formats.forEach(function (f, idx) {
+    var btn = document.createElement("button");
+    btn.className = "component-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = f.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(formatList.children, function (el) { el.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderFormatDetail(f);
+    });
+    formatList.appendChild(btn);
+  });
+  renderFormatDetail(formats[0]);
+
+  // ---------------- Backing-chain resolution demo ----------------
+  var BLOCK_COUNT = 8;
+  var layers = [
+    { id: "base", label: "Base image", owns: [0, 1, 2, 3, 4, 5, 6, 7] }, // base "owns" every block (original data)
+    { id: "a", label: "Snapshot A", owns: [2, 5] },
+    { id: "b", label: "Snapshot B (current)", owns: [1, 5] }
+  ];
+
+  function renderBlockGrid(container, ownedSet, queriedBlock) {
+    container.innerHTML = "";
+    for (var i = 0; i < BLOCK_COUNT; i++) {
+      var btn = document.createElement("button");
+      btn.className = "block-btn" + (ownedSet.indexOf(i) !== -1 ? " owned" : "") + (i === queriedBlock ? " queried" : "");
+      btn.textContent = i;
+      container.appendChild(btn);
+    }
+  }
+
+  var baseBlocksEl = document.getElementById("baseBlocks");
+  var aBlocksEl = document.getElementById("aBlocks");
+  var bBlocksEl = document.getElementById("bBlocks");
+  var queryBlocksEl = document.getElementById("queryBlocks");
+  var resolveTrace = document.getElementById("resolveTrace");
+  var queriedBlock = null;
+
+  function renderAll() {
+    renderBlockGrid(baseBlocksEl, layers[0].owns, queriedBlock);
+    renderBlockGrid(aBlocksEl, layers[1].owns, queriedBlock);
+    renderBlockGrid(bBlocksEl, layers[2].owns, queriedBlock);
+
+    queryBlocksEl.innerHTML = "";
+    for (var i = 0; i < BLOCK_COUNT; i++) {
+      var btn = document.createElement("button");
+      btn.className = "block-btn" + (i === queriedBlock ? " queried" : "");
+      btn.textContent = i;
+      btn.dataset.block = i;
+      queryBlocksEl.appendChild(btn);
+    }
+
+    if (queriedBlock === null) {
+      resolveTrace.innerHTML = "<span style=\"color: var(--text-muted);\">Click a block number above to trace how a read for it resolves.</span>";
+      return;
+    }
+
+    var lines = [];
+    var found = false;
+    for (var li = layers.length - 1; li >= 0; li--) {
+      var layer = layers[li];
+      var owns = layer.owns.indexOf(queriedBlock) !== -1;
+      if (owns) {
+        lines.push('<div class="resolve-line"><span class="hit">Block ' + queriedBlock + " found in " + layer.label + " — read served here.</span></div>");
+        found = true;
+        break;
+      } else {
+        lines.push('<div class="resolve-line"><span class="miss">' + layer.label + ": block " + queriedBlock + " not written here, fall through to backing file...</span></div>");
+      }
+    }
+    resolveTrace.innerHTML = lines.join("");
+  }
+
+  queryBlocksEl.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    queriedBlock = parseInt(btn.dataset.block, 10);
+    renderAll();
+  });
+
+  renderAll();
+})();
+</script>
+</body>
+</html>

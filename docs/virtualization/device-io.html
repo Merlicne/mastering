@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Device &amp; I/O Virtualization — Virtualization — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .component-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .component-explorer { grid-template-columns: 1fr; } }
+  .component-list { display: flex; flex-direction: column; gap: 6px; }
+  .component-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .component-btn:hover { border-color: var(--accent); }
+  .component-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .diagram { display: flex; flex-direction: column; gap: 20px; padding: 10px 4px; min-height: 40px; }
+  .hop-row { display: flex; align-items: center; gap: 10px; }
+  .hop-node { flex: 0 0 auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+  .hop-line { flex: 1; position: relative; height: 2px; background: var(--accent); margin: 18px 4px 0; }
+  .hop-line::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .phase-note { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--accent-2); margin: 22px 0 4px; }
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+
+  .decision-form { display: flex; flex-direction: column; gap: 12px; margin: 16px 0; }
+  .decision-form label { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+  .recommend-box { margin-top: 14px; padding: 16px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .recommend-box h4 { margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 4 of 6</span>
+    <h1>Device &amp; I/O Virtualization</h1>
+    <p>CPU and memory virtualization (previous two pages) let a guest run its own code safely. Devices are a separate problem: a guest still needs to talk to disks and network cards it doesn't actually own. There are three fundamentally different ways to give it that access, trading off performance, guest compatibility, and flexibility very differently.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Three ways to expose a device to a guest</h3>
+    <div class="component-explorer">
+      <div class="component-list" id="deviceList"></div>
+      <div class="component-detail-panel" id="deviceDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Which one fits your workload?</h3>
+    <p style="margin-top: 0;">Answer a few questions and see which approach QEMU/KVM would actually recommend:</p>
+    <div class="decision-form">
+      <label><input type="checkbox" id="qNearNative"> Needs as-close-to-native performance as possible (e.g. GPU compute, high-throughput NIC)</label>
+      <label><input type="checkbox" id="qMigration" checked> Must support live migration to another host</label>
+      <label><input type="checkbox" id="qDriver" checked> Guest OS is known to have virtio drivers available</label>
+      <label><input type="checkbox" id="qShare"> The physical device needs to be shared across several VMs at once</label>
+    </div>
+    <div class="recommend-box" id="deviceRecommend"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">How a packet actually leaves a VM</h3>
+    <p style="margin-top: 0;">The default networking setup uses virtio-net plus a <span class="term" data-tip="A virtual network interface that behaves like a physical NIC to whatever it's attached to on the host side, but delivers/receives raw Ethernet frames to/from a userspace process (like QEMU) instead of real wire.">TAP device</span> and a Linux bridge — the exact same bridging primitive already covered on the <a href="../networking/linux-networking.html">Linux Networking</a> and <a href="../networking/container-networking.html">Container Networking</a> pages, just with a VM's virtio-net interface sitting where a container's veth pair sat before. Step through one outgoing packet:</p>
+
+    <div class="diagram" id="pktDiagram"></div>
+    <div class="panel step-text" id="pktStepText" style="margin-top: 6px;"></div>
+    <div class="controls">
+      <button class="btn" id="pktResetBtn">⟲ Reset</button>
+      <button class="btn" id="pktPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="pktNextBtn">Next ▶</button>
+      <span class="step-counter" id="pktStepCounter"></span>
+    </div>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 12px; margin-bottom: 0;">Two optimizations worth knowing by name: <span class="mono">vhost-net</span> moves the QEMU-side packet-copying step into the kernel, skipping a userspace round trip; <span class="mono">macvtap</span> replaces the bridge with a more direct interface-to-interface mapping when you don't need full bridge features. Both keep the same virtio-net guest driver — only the host-side path changes.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>virtio needs a cooperating guest.</strong> It's paravirtualization (see <a href="fundamentals.html">Fundamentals</a>) — an ancient or unusual guest OS without virtio drivers has to fall back to slower fully-emulated devices (e.g. an emulated e1000 NIC or IDE controller) instead.</li>
+      <li style="margin-bottom: 6px;"><strong>PCI passthrough requires IOMMU support, enabled at multiple layers.</strong> The CPU, the motherboard/BIOS, and the host kernel all need IOMMU (VT-d on Intel, AMD-Vi on AMD) turned on — it isolates the passed-through device's DMA so it can only touch that guest's memory, not the whole host's.</li>
+      <li style="margin-bottom: 6px;"><strong>Passthrough breaks live migration.</strong> A physical device passed straight through is physically attached to one specific host — there's no way to move a running VM using it to different hardware without first detaching the device. This is the single biggest reason virtio remains the default even when passthrough would be faster.</li>
+      <li><strong>SR-IOV isn't "passthrough but shared" for free.</strong> It requires a physical NIC that itself supports SR-IOV and exposes multiple <span class="term" data-tip="Virtual Functions -- lightweight, hardware-backed PCIe devices spawned from one physical NIC (the Physical Function), each independently assignable to a different VM via passthrough.">Virtual Functions (VFs)</span> in hardware; the number of VFs is fixed by the NIC, not something software can expand.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="memory-virtualization.html">← Previous: Memory Virtualization</a>
+    <a href="storage.html">Next: Storage: Disk Images &amp; Snapshots →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Device model explorer ----------------
+  var devices = [
+    { name: "Emulated device", desc: "QEMU fully emulates a real, physical piece of hardware in software — e.g. an Intel e1000 NIC or an IDE/AHCI controller — so any guest OS with an ordinary, unmodified driver for that real hardware just works, with zero guest-side awareness of virtualization. This is the slowest option: every access triggers a VMEXIT into QEMU, which fully re-implements register-level device behavior in software. Mainly useful for maximum compatibility (old/unusual guests) or during early boot before paravirtualized drivers load." },
+    { name: "virtio (paravirtualized)", desc: "A device interface designed from scratch for virtualization, not modeled after any real hardware. The guest runs a virtio-aware driver that knows it's talking to a hypervisor, using shared ring buffers to batch requests and minimize the number of expensive VMEXITs. Needs the guest to have virtio drivers (standard in every modern Linux kernel and in Windows via installable drivers), but delivers near-native throughput without any hardware passthrough. This is QEMU/KVM's default for disk (virtio-blk/virtio-scsi) and network (virtio-net) — see the <a href='storage.html'>Storage</a> page for the disk side." },
+    { name: "PCI passthrough / VFIO", desc: "The guest gets direct, exclusive access to a real physical PCI device — the host's kernel driver detaches from it entirely, and VFIO (Virtual Function I/O) hands it to the guest with IOMMU-enforced isolation so the guest can safely DMA to/from its own memory only. Near-native performance since the guest talks straight to hardware with no emulation layer at all, at the cost of exclusivity (one VM, one device) and losing live migration for that VM." },
+    { name: "SR-IOV", desc: "Single Root I/O Virtualization: a passthrough variant for NICs (and some other devices) that support it in hardware. One physical device (the Physical Function) exposes several lightweight Virtual Functions, each of which can be passed through to a different VM independently — near-native performance for several guests at once from one physical card, without the 'one device, one VM' limitation of plain passthrough." }
+  ];
+
+  var deviceList = document.getElementById("deviceList");
+  var deviceDetail = document.getElementById("deviceDetail");
+
+  function renderDeviceDetail(d) {
+    deviceDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + d.name + "</h4><p>" + d.desc + "</p>";
+  }
+  devices.forEach(function (d, idx) {
+    var btn = document.createElement("button");
+    btn.className = "component-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = d.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(deviceList.children, function (el) { el.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderDeviceDetail(d);
+    });
+    deviceList.appendChild(btn);
+  });
+  renderDeviceDetail(devices[0]);
+
+  // ---------------- Decision demo ----------------
+  var qNearNative = document.getElementById("qNearNative");
+  var qMigration = document.getElementById("qMigration");
+  var qDriver = document.getElementById("qDriver");
+  var qShare = document.getElementById("qShare");
+  var deviceRecommend = document.getElementById("deviceRecommend");
+
+  function recomputeRecommend() {
+    var nearNative = qNearNative.checked;
+    var migration = qMigration.checked;
+    var driver = qDriver.checked;
+    var share = qShare.checked;
+
+    var name, why;
+    if (!driver) {
+      name = "Emulated device";
+      why = "No virtio drivers available in the guest, so paravirtualization is off the table — an emulated device is the only option that just works without installing anything in the guest.";
+    } else if (nearNative && migration && share) {
+      name = "SR-IOV";
+      why = "You want near-native performance shared across VMs while keeping migration — that combination needs SR-IOV's hardware-backed Virtual Functions specifically, plus migration support configured around detaching/reattaching the VF.";
+    } else if (nearNative && !migration) {
+      name = "PCI passthrough / VFIO";
+      why = "Since live migration isn't required, a plain passthrough device gives the best possible performance with no emulation overhead at all.";
+    } else if (nearNative && migration && !share) {
+      name = "virtio, tuned (or reconsider the migration requirement)";
+      why = "You want near-native performance and migration on a single, non-shared device — plain passthrough would give you the performance but break migration. virtio with vhost-net/vhost-user gets you close to native without sacrificing migration; true passthrough-level performance and migration together generally requires SR-IOV even for a single VM.";
+    } else {
+      name = "virtio (paravirtualized)";
+      why = "This is the default for a reason: near-native-enough throughput, full live migration support, and no exclusivity constraints — right for the overwhelming majority of workloads that don't have an explicit maximum-performance requirement.";
+    }
+
+    deviceRecommend.innerHTML = "<h4>Recommended: " + name + "</h4><p style=\"margin:0;\">" + why + "</p>";
+  }
+
+  [qNearNative, qMigration, qDriver, qShare].forEach(function (el) {
+    el.addEventListener("change", recomputeRecommend);
+  });
+  recomputeRecommend();
+
+  // ---------------- Packet-leaving-a-VM step-through ----------------
+  var pktSteps = [
+    { from: "Guest app", to: "Guest network stack", phase: "Guest side", text: "An application inside the guest sends data; the guest kernel's normal network stack builds an Ethernet frame exactly as it would on bare metal." },
+    { from: "Guest kernel", to: "virtio-net (guest driver)", phase: "Guest side", text: "The guest's virtio-net driver places the frame into a shared ring buffer instead of writing to real NIC registers — this is the paravirtualized interface from the explorer above." },
+    { from: "virtio-net", to: "VMEXIT", phase: "Transition", text: "Notifying the host that data is ready triggers a VMEXIT — but virtio's ring-buffer design means this happens far less often than per-packet, batching many frames per exit." },
+    { from: "QEMU / vhost-net", to: "TAP device", phase: "Host side", text: "On the host, either QEMU userspace or the in-kernel vhost-net fast path reads the frame off the ring and writes it to a TAP device — a virtual NIC that hands raw Ethernet frames to whatever's listening on the host side." },
+    { from: "TAP device", to: "Linux bridge", phase: "Host side", text: "The TAP device is a port on a Linux bridge (br0 or similar) — the same bridging mechanism used for container networking, just with a VM's TAP interface instead of a container's veth end." },
+    { from: "Linux bridge", to: "Physical NIC", phase: "Host side", text: "The bridge forwards the frame out the host's physical NIC, exactly as it would forward between any two of its ports, and the frame is now on the real network." }
+  ];
+
+  var pktDiagram = document.getElementById("pktDiagram");
+  var pktStepText = document.getElementById("pktStepText");
+  var pktStepCounter = document.getElementById("pktStepCounter");
+  var pktPrevBtn = document.getElementById("pktPrevBtn");
+  var pktNextBtn = document.getElementById("pktNextBtn");
+  var pktResetBtn = document.getElementById("pktResetBtn");
+  var pktStepIndex = 0;
+
+  function renderPkt() {
+    pktDiagram.innerHTML = "";
+    var lastPhase = null;
+    for (var i = 0; i <= pktStepIndex; i++) {
+      var step = pktSteps[i];
+      if (step.phase !== lastPhase) {
+        var phaseEl = document.createElement("div");
+        phaseEl.className = "phase-note";
+        phaseEl.textContent = step.phase;
+        pktDiagram.appendChild(phaseEl);
+        lastPhase = step.phase;
+      }
+      var row = document.createElement("div");
+      row.className = "hop-row";
+      row.innerHTML = '<div class="hop-node">' + step.from + "</div><div class=\"hop-line\"></div><div class=\"hop-node\">" + step.to + "</div>";
+      pktDiagram.appendChild(row);
+    }
+    pktStepText.textContent = pktSteps[pktStepIndex].text;
+    pktStepCounter.textContent = "Step " + (pktStepIndex + 1) + " / " + pktSteps.length;
+    pktPrevBtn.disabled = pktStepIndex === 0;
+    pktNextBtn.disabled = pktStepIndex === pktSteps.length - 1;
+  }
+
+  pktPrevBtn.addEventListener("click", function () { if (pktStepIndex > 0) { pktStepIndex--; renderPkt(); } });
+  pktNextBtn.addEventListener("click", function () { if (pktStepIndex < pktSteps.length - 1) { pktStepIndex++; renderPkt(); } });
+  pktResetBtn.addEventListener("click", function () { pktStepIndex = 0; renderPkt(); });
+  renderPkt();
+})();
+</script>
+</body>
+</html>

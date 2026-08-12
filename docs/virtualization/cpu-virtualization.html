@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CPU Virtualization — Virtualization — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .component-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .component-explorer { grid-template-columns: 1fr; } }
+  .component-list { display: flex; flex-direction: column; gap: 6px; }
+  .component-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .component-btn:hover { border-color: var(--accent); }
+  .component-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .diagram { display: flex; flex-direction: column; gap: 20px; padding: 10px 4px; min-height: 40px; }
+  .hop-row { display: flex; align-items: center; gap: 10px; }
+  .hop-node { flex: 0 0 auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+  .hop-node.mode-root { border-color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 16%, transparent); }
+  .hop-node.mode-nonroot { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+  .hop-line { flex: 1; position: relative; height: 2px; background: var(--accent); margin: 18px 4px 0; }
+  .hop-line::after { content: ""; position: absolute; right: 0; top: -4px; border-style: solid; border-width: 5px 0 5px 9px; border-color: transparent transparent transparent var(--accent); }
+  .phase-note { font-size: 0.78rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--accent-2); margin: 22px 0 4px; }
+  .step-text { min-height: 3.2em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 2 of 6</span>
+    <h1>CPU Virtualization</h1>
+    <p>The <a href="fundamentals.html">Fundamentals</a> page showed trap-and-emulate as the general idea. This page covers why plain x86 couldn't actually do it, how Intel and AMD fixed that in hardware, and how KVM and QEMU split the resulting work between kernel and userspace.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Why x86 wasn't classically virtualizable</h3>
+    <p style="margin-top: 0;">The <span class="term" data-tip="Formalized in 1974 by Gerald Popek and Robert Goldberg: a CPU architecture can be virtualized with pure trap-and-emulate if and only if every 'sensitive' instruction (one that can observe or change privileged state) is also a 'privileged' instruction (one that always traps when run outside ring 0).">Popek-Goldberg theorem</span> gives a precise condition for when trap-and-emulate works cleanly: every instruction that touches privileged state must also be one that traps when a lower-privilege caller runs it. Classic x86 failed this. Researchers identified roughly 17 instructions that were <em>sensitive</em> — they read or changed privileged CPU state — but <em>not privileged</em>: run from ring 3, they didn't trap, they just silently did the wrong thing or returned stale data.</p>
+    <p><span class="mono">POPF</span> is the textbook example: it's supposed to restore CPU flags, including the interrupt-enable flag — a privileged bit. Run from an unprivileged ring, it doesn't trap and doesn't fail loudly. It just quietly fails to change that one bit, and execution continues as if nothing happened. A hypervisor trying to intercept every privileged operation has nothing to catch here — there's no trap to hook.</p>
+    <p style="margin-bottom: 0;">Before 2005, hypervisors worked around this with two very different strategies:</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The instructions that actually broke it</h3>
+    <p style="margin-top: 0;">"Sensitive but not privileged" isn't abstract — it's a specific, short list of x86 instructions. Every one below runs from any ring with no fault at all, which is exactly the problem: there's no trap for a software-only hypervisor to hook.</p>
+    <table>
+      <thead><tr><th>Instruction(s)</th><th>What it does</th><th>Why it broke trap-and-emulate</th></tr></thead>
+      <tbody>
+        <tr>
+          <td class="mono">SGDT</td>
+          <td>Stores the Global Descriptor Table register into memory.</td>
+          <td>Hands back the <strong>real</strong> host GDT base address to any ring — the guest can read genuine machine state the hypervisor never agreed to expose, with nothing to intercept.</td>
+        </tr>
+        <tr>
+          <td class="mono">SIDT</td>
+          <td>Stores the Interrupt Descriptor Table register into memory.</td>
+          <td>Same problem as SGDT, for the IDT. This is the instruction most often used to literally <em>detect</em> that you're running inside a VM: its returned address falls in a suspiciously different range than bare metal.</td>
+        </tr>
+        <tr>
+          <td class="mono">SLDT</td>
+          <td>Stores the Local Descriptor Table register.</td>
+          <td>Reveals real LDT state to an unprivileged caller, same shape as SGDT/SIDT.</td>
+        </tr>
+        <tr>
+          <td class="mono">SMSW</td>
+          <td>Stores the low bits of CR0 (machine status word).</td>
+          <td>CR0 holds privileged control bits; reading it is supposed to be gated, but SMSW isn't — it just returns the truth, unfiltered.</td>
+        </tr>
+        <tr>
+          <td class="mono">PUSHF / POPF</td>
+          <td>Push/pop the EFLAGS register, including the interrupt-enable (IF) flag.</td>
+          <td>The textbook case: POPF from a demoted guest silently fails to change IF rather than faulting — the guest's attempt to (say) disable interrupts just quietly doesn't happen, with no signal that anything went wrong.</td>
+        </tr>
+        <tr>
+          <td class="mono">STR</td>
+          <td>Stores the Task Register selector.</td>
+          <td>Same "reveals real state, no fault" shape again, this time for the task register.</td>
+        </tr>
+        <tr>
+          <td class="mono">LAR / LSL / VERR / VERW</td>
+          <td>Read a segment descriptor's access rights / limit, or verify it's readable/writable at the current privilege level.</td>
+          <td>These evaluate privilege-dependent segment properties directly, without a <span class="term" data-tip="Current Privilege Level: the ring number (0-3) the CPU considers itself to be running at right now. Ordinary privileged instructions check the CPL automatically before executing; these four don't.">CPL</span> check gating the instruction itself — so they can return answers based on the guest's real (demoted) privilege level instead of the virtual ring 0 it's supposed to believe it has.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">Researchers (Robin &amp; Irvine, 2000) counted roughly 17 such instructions in total on x86 — this table covers the most commonly cited ones, not an exhaustive list. Binary translation patched around every one of them by rewriting guest code; VT-x/AMD-V closed the gap in hardware by adding them to the VMCS/VMCB's configurable exit-cause bitmap, covered next.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Two fixes: binary translation vs. hardware-assisted virtualization</h3>
+    <div class="component-explorer">
+      <div class="component-list" id="fixList"></div>
+      <div class="component-detail-panel" id="fixDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">The VMEXIT / VMENTRY cycle</h3>
+    <p style="margin-top: 0;">With hardware-assisted virtualization, the CPU gains a new mode dimension on top of the existing rings: <span class="term" data-tip="The hypervisor's mode -- full control over the machine, including the ability to configure the VMCS/VMCB and manage guests.">VMX root mode</span> (Intel) or the AMD-V equivalent, and <span class="term" data-tip="The guest's mode -- the guest kernel really does execute in ring 0 here, but a hardware-defined list of events automatically forces an exit back to root mode.">VMX non-root mode</span>, where the guest actually runs in real ring 0. A per-vCPU structure — the <span class="term" data-tip="Virtual Machine Control Structure (Intel) / Virtual Machine Control Block (AMD): holds the guest's CPU register state, the host's state to restore on exit, and a bitmap of exactly which events (I/O port access, certain instructions, exceptions, interrupts) should trigger a VMEXIT.">VMCS (Intel) / VMCB (AMD)</span> — tells the CPU exactly which events should force a <span class="term" data-tip="Virtual Machine Exit: the hardware-forced transition from VMX non-root mode (guest running) back to VMX root mode (hypervisor in control). No software trap handler decides this happens -- the CPU itself checks the VMCS/VMCB's configured trigger list and switches modes automatically.">VMEXIT</span> — control leaving the guest and landing back with the hypervisor — and later a <span class="term" data-tip="Virtual Machine Entry: the operation the hypervisor performs to resume a guest, switching the CPU from VMX root mode back to VMX non-root mode and restoring the guest's saved register state from the VMCS/VMCB.">VMENTRY</span> to resume it. Step through one cycle:</p>
+
+    <div class="diagram" id="exitDiagram"></div>
+    <div class="panel step-text" id="exitStepText" style="margin-top: 6px;"></div>
+    <div class="controls">
+      <button class="btn" id="exitResetBtn">⟲ Reset</button>
+      <button class="btn" id="exitPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="exitNextBtn">Next ▶</button>
+      <span class="step-counter" id="exitStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">KVM vs. QEMU: who does what</h3>
+    <p style="margin-top: 0;"><span class="mono">KVM</span> is a Linux kernel module (exposed as <span class="mono">/dev/kvm</span>) that owns the VMCS/VMCB and drives the VMENTRY/VMEXIT cycle above. <span class="mono">QEMU</span> is an ordinary userspace process that opens <span class="mono">/dev/kvm</span>, creates one thread per vCPU, and asks KVM to run the guest. Whenever a VMEXIT happens, KVM either handles it itself (fast — stays in the kernel) or, for anything it doesn't understand (nearly all device I/O), returns control to QEMU, which emulates the device and hands control back.</p>
+    <table>
+      <thead><tr><th>VMEXIT reason</th><th>Handled by</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="mono"><span class="term" data-tip="Extended Page Tables (Intel) / Nested Page Tables (AMD): a hardware-walked second page table for guest-physical -> host-physical translation. A violation here means the guest touched a guest-physical address with no mapping yet. Covered in full on the Memory Virtualization page.">EPT</span> violation → known RAM page</td><td><span class="badge badge-ok">KVM (in-kernel)</span></td><td>Just needs a page-table fixup — no need to leave the kernel.</td></tr>
+        <tr><td class="mono">Local APIC / timer access</td><td><span class="badge badge-ok">KVM (in-kernel)</span></td><td>Performance-critical and self-contained; KVM emulates the local APIC itself.</td></tr>
+        <tr><td class="mono">I/O port access to a virtio or emulated NIC/disk</td><td><span class="badge badge-warn">QEMU (userspace)</span></td><td>Device emulation logic lives in QEMU, not the kernel — see the <a href="device-io.html">Device &amp; I/O</a> page.</td></tr>
+        <tr><td class="mono"><span class="term" data-tip="Memory-Mapped I/O: device registers exposed as addresses in the normal memory space, so reading/writing that address range talks to the device instead of RAM. The CPU intercepts guest accesses to these ranges the same way it intercepts other configured VMEXIT triggers.">MMIO</span> access to an emulated PCI device</td><td><span class="badge badge-warn">QEMU (userspace)</span></td><td>Same reason — QEMU owns the device models.</td></tr>
+        <tr><td class="mono">CPUID</td><td><span class="badge badge-ok">KVM (in-kernel)</span></td><td>KVM reports a filtered/masked feature set so the guest doesn't see host-only CPU features.</td></tr>
+      </tbody>
+    </table>
+    <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 10px; margin-bottom: 0;">This split is exactly why the <a href="qemu-libvirt-practice.html">QEMU &amp; libvirt in Practice</a> page's <span class="mono">-enable-kvm</span> flag matters so much: without it, QEMU falls back to <span class="term" data-tip="Tiny Code Generator -- QEMU's built-in software CPU emulator/binary translator, used when no hardware acceleration (KVM/HVF/WHPX) is available. Every guest instruction is translated and interpreted in software.">TCG</span>, its own software binary translator, and every one of these becomes orders of magnitude slower.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>Forgetting <span class="mono">-enable-kvm</span> doesn't fail loudly.</strong> QEMU silently falls back to TCG software emulation — the VM still boots, just 10-50x slower, which makes it a confusing performance bug rather than an obvious error.</li>
+      <li style="margin-bottom: 6px;"><strong>Nested virtualization needs the extension exposed through, layer by layer.</strong> Running KVM inside a VM requires the outer hypervisor to expose VT-x/AMD-V to that guest — most cloud providers disable this by default, and it must be requested explicitly (e.g. a nested-virtualization-capable instance type).</li>
+      <li style="margin-bottom: 6px;"><strong>CPU model mismatches break live migration.</strong> If the destination host's CPU is missing a feature the guest was told it has (via QEMU's <span class="mono">-cpu</span> flag), the guest can crash on migration. Production setups usually pin a conservative, portable CPU model rather than passing through the host's exact features.</li>
+      <li><strong>"Hardware-assisted" doesn't mean "free."</strong> Every VMEXIT still costs real cycles — thousands of them — to save/restore state. Reducing VMEXIT frequency (e.g. via virtio's batched, interrupt-coalescing design) is a major reason paravirtualized devices outperform emulated ones.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="fundamentals.html">← Previous: Fundamentals &amp; Hypervisor Types</a>
+    <a href="memory-virtualization.html">Next: Memory Virtualization →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Binary translation vs hardware-assisted explorer ----------------
+  var fixes = [
+    { name: "Binary translation (software)", desc: "Pioneered by VMware in the late 1990s. The hypervisor scans guest kernel code before it runs and rewrites the ~17 problem instructions into safe equivalents that do trap correctly, while leaving ordinary ring-3 user code running natively at full speed. Clever and fast for its time, but complex to implement correctly and with real translation overhead for kernel-heavy workloads." },
+    { name: "Hardware-assisted (VT-x / AMD-V)", desc: "Introduced by Intel (VT-x, 2005) and AMD (AMD-V, 2006). The CPU itself gains a new mode: the guest genuinely executes in ring 0 inside 'VMX non-root mode,' and a hardware-defined, configurable list of events automatically triggers an exit back to the hypervisor running in 'VMX root mode.' No instruction rewriting needed — the problem instructions above simply become part of that trap list. This is what modern KVM, and QEMU when accelerated, actually use." }
+  ];
+
+  var fixList = document.getElementById("fixList");
+  var fixDetail = document.getElementById("fixDetail");
+
+  function renderFixDetail(f) {
+    fixDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + f.name + "</h4><p>" + f.desc + "</p>";
+  }
+  fixes.forEach(function (f, idx) {
+    var btn = document.createElement("button");
+    btn.className = "component-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = f.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(fixList.children, function (el) { el.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderFixDetail(f);
+    });
+    fixList.appendChild(btn);
+  });
+  renderFixDetail(fixes[0]);
+
+  // ---------------- VMEXIT / VMENTRY step-through ----------------
+  var exitSteps = [
+    { from: "Guest kernel", to: "VMX non-root", phase: "Running", text: "The guest kernel executes normally in VMX non-root mode — it's genuinely in ring 0 here, no demotion trickery needed.", mode: "nonroot" },
+    { from: "Guest", to: "I/O port write", phase: "Running", text: "The guest writes to an I/O port to talk to a (virtual) NIC — one of the events this VCPU's VMCS is configured to intercept.", mode: "nonroot" },
+    { from: "CPU hardware", to: "VMEXIT", phase: "Exit", text: "The CPU hardware itself — no software trap handler involved yet — automatically saves the guest's full register state into the VMCS and switches to VMX root mode.", mode: "root" },
+    { from: "KVM", to: "Decode reason", phase: "Exit", text: "KVM (running in VMX root mode, in the kernel) reads the VMCS's exit-reason field: this was an I/O instruction, on this port, with this data.", mode: "root" },
+    { from: "KVM", to: "QEMU", phase: "Handle", text: "KVM doesn't know how to emulate this NIC itself, so it returns control to the QEMU userspace process, which owns the device model.", mode: "root" },
+    { from: "QEMU", to: "Device model", phase: "Handle", text: "QEMU's virtual NIC device model processes the write (e.g. queues a packet for transmission) and prepares the result the guest expects.", mode: "root" },
+    { from: "QEMU", to: "KVM ioctl", phase: "Resume", text: "QEMU issues a KVM_RUN ioctl to resume the vCPU. The CPU executes a VMENTRY, restoring the guest's saved state from the VMCS.", mode: "root" },
+    { from: "Guest kernel", to: "VMX non-root", phase: "Running", text: "The guest resumes exactly where it left off, in VMX non-root mode, with no idea any of this just happened.", mode: "nonroot" }
+  ];
+
+  var exitDiagram = document.getElementById("exitDiagram");
+  var exitStepText = document.getElementById("exitStepText");
+  var exitStepCounter = document.getElementById("exitStepCounter");
+  var exitPrevBtn = document.getElementById("exitPrevBtn");
+  var exitNextBtn = document.getElementById("exitNextBtn");
+  var exitResetBtn = document.getElementById("exitResetBtn");
+  var exitStepIndex = 0;
+
+  function renderExit() {
+    exitDiagram.innerHTML = "";
+    var lastPhase = null;
+    for (var i = 0; i <= exitStepIndex; i++) {
+      var step = exitSteps[i];
+      if (step.phase !== lastPhase) {
+        var phaseEl = document.createElement("div");
+        phaseEl.className = "phase-note";
+        phaseEl.textContent = step.phase;
+        exitDiagram.appendChild(phaseEl);
+        lastPhase = step.phase;
+      }
+      var row = document.createElement("div");
+      row.className = "hop-row";
+      var modeClass = " mode-" + step.mode;
+      row.innerHTML = '<div class="hop-node' + modeClass + '">' + step.from + "</div><div class=\"hop-line\"></div><div class=\"hop-node" + modeClass + "\">" + step.to + "</div>";
+      exitDiagram.appendChild(row);
+    }
+    exitStepText.textContent = exitSteps[exitStepIndex].text;
+    exitStepCounter.textContent = "Step " + (exitStepIndex + 1) + " / " + exitSteps.length;
+    exitPrevBtn.disabled = exitStepIndex === 0;
+    exitNextBtn.disabled = exitStepIndex === exitSteps.length - 1;
+  }
+
+  exitPrevBtn.addEventListener("click", function () { if (exitStepIndex > 0) { exitStepIndex--; renderExit(); } });
+  exitNextBtn.addEventListener("click", function () { if (exitStepIndex < exitSteps.length - 1) { exitStepIndex++; renderExit(); } });
+  exitResetBtn.addEventListener("click", function () { exitStepIndex = 0; renderExit(); });
+  renderExit();
+})();
+</script>
+</body>
+</html>

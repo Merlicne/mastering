@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Virtualization — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Interactive Mini-Course</span>
+    <h1>Virtualization</h1>
+    <p>Six pages on how a hypervisor turns one physical machine into several isolated virtual ones: why it's even possible, how CPU and memory access get intercepted and remapped, how devices and storage are emulated or passed through, and — tying it all together — a hands-on walkthrough using <a class="term" data-tip="A free, open-source machine emulator and virtualizer. Can emulate a CPU entirely in software (TCG) or, on Linux, hand CPU virtualization off to the kernel's KVM module for near-native speed.">QEMU</a> and <a class="term" data-tip="A toolkit (daemon + virsh CLI + XML domain definitions) for managing QEMU/KVM virtual machines declaratively, instead of hand-typing every qemu-system flag.">libvirt</a>.</p>
+  </div>
+
+  <div id="primaryMount"></div>
+  <div id="secondaryMount"></div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var SUBJECT = "virtualization";
+  var content = window.CONTENT || [];
+
+  function homeLabel(path) {
+    var home = path.split("/")[0];
+    return home.charAt(0).toUpperCase() + home.slice(1);
+  }
+
+  function cardHtml(entry, crossTag) {
+    var href = entry.path.indexOf(SUBJECT + "/") === 0 ? entry.path.slice(SUBJECT.length + 1) : "../" + entry.path;
+    var badge = crossTag ? '<span class="cross-tag-badge">Also in ' + homeLabel(entry.path) + '</span>' : "";
+    return '<a class="topic-card' + (crossTag ? " cross-tag" : "") + '" href="' + href + '">' +
+      badge +
+      '<span class="icon">' + entry.icon + "</span>" +
+      "<h3>" + entry.title + "</h3>" +
+      "<p>" + entry.description + "</p>" +
+      "</a>";
+  }
+
+  function renderPrimary() {
+    var primary = content.filter(function (e) { return e.path.indexOf(SUBJECT + "/") === 0; });
+    var groups = [];
+    var byName = {};
+    primary.forEach(function (e) {
+      var name = e.group || "";
+      if (!byName[name]) { byName[name] = { name: name, items: [] }; groups.push(byName[name]); }
+      byName[name].items.push(e);
+    });
+
+    var html = "";
+    groups.forEach(function (group, idx) {
+      if (groups.length > 1) {
+        html += "<h2 style=\"margin: " + (idx === 0 ? "0" : "32px") + " 0 4px;\">" + group.name + "</h2>";
+      }
+      html += '<div class="topic-grid">' + group.items.map(function (e) { return cardHtml(e, false); }).join("") + "</div>";
+    });
+    document.getElementById("primaryMount").innerHTML = html;
+  }
+
+  function renderSecondary() {
+    var secondary = content.filter(function (e) { return e.path.indexOf(SUBJECT + "/") !== 0 && e.tags.indexOf(SUBJECT) !== -1; });
+    if (secondary.length === 0) return;
+    var html = "<h2 style=\"margin: 32px 0 4px;\">Also relevant</h2>" +
+      "<p style=\"color: var(--text-muted); margin: 0;\">Pages that live in another subject but touch " + SUBJECT + " directly.</p>" +
+      '<div class="topic-grid">' + secondary.map(function (e) { return cardHtml(e, true); }).join("") + "</div>";
+    document.getElementById("secondaryMount").innerHTML = html;
+  }
+
+  renderPrimary();
+  renderSecondary();
+})();
+</script>
+</body>
+</html>

@@ -57,5 +57,19 @@ window.CONTENT = [
   { path: "kubernetes/policy-security.html", navLabel: "Policy & Security", title: "Policy & Security", icon: "🛡️", tags: ["kubernetes", "security"], group: "Kubernetes",
     description: "RBAC, Pod Security Admission, ResourceQuotas, and admission controllers — test a permission check yourself." },
   { path: "kubernetes/extensibility.html", navLabel: "Extensibility", title: "Extensibility & Ecosystem", icon: "🧩", tags: ["kubernetes"], group: "Kubernetes",
-    description: "Custom Resource Definitions, the Operator pattern, and how Helm and Kustomize package and customize manifests." }
+    description: "Custom Resource Definitions, the Operator pattern, and how Helm and Kustomize package and customize manifests." },
+
+  // ---- virtualization ----
+  { path: "virtualization/fundamentals.html", navLabel: "Fundamentals", title: "Fundamentals & Hypervisor Types", icon: "🧠", tags: ["virtualization"], group: "Virtualization",
+    description: "Why virtualization is even possible (ring privilege, trap-and-emulate), Type 1 vs Type 2 hypervisors, and how VMs differ from containers." },
+  { path: "virtualization/cpu-virtualization.html", navLabel: "CPU Virtualization", title: "CPU Virtualization", icon: "⚙️", tags: ["virtualization"], group: "Virtualization",
+    description: "Binary translation vs hardware-assisted virtualization (VT-x/AMD-V), the VMEXIT/VMENTRY cycle, and how KVM and QEMU split the work." },
+  { path: "virtualization/memory-virtualization.html", navLabel: "Memory Virtualization", title: "Memory Virtualization", icon: "🧩", tags: ["virtualization"], group: "Virtualization",
+    description: "The double address translation problem, shadow page tables vs EPT/NPT, memory overcommit, ballooning, and KSM." },
+  { path: "virtualization/device-io.html", navLabel: "Device & I/O", title: "Device & I/O Virtualization", icon: "🔌", tags: ["virtualization"], group: "Virtualization",
+    description: "Emulated devices vs paravirtualized virtio drivers vs PCI passthrough — and how a VM actually gets on the network." },
+  { path: "virtualization/storage.html", navLabel: "Storage", title: "Storage: Disk Images & Snapshots", icon: "💽", tags: ["virtualization"], group: "Virtualization",
+    description: "Raw vs qcow2, copy-on-write backing files, snapshots, and virtio-blk vs virtio-scsi." },
+  { path: "virtualization/qemu-libvirt-practice.html", navLabel: "QEMU & libvirt", title: "QEMU & libvirt in Practice", icon: "🖥️", tags: ["virtualization"], group: "Virtualization",
+    description: "Hands-on: create a disk image, boot a VM with qemu-system-x86_64, wire up virtio-net, take a snapshot, then manage it with libvirt." }
 ];

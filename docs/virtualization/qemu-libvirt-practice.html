@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QEMU &amp; libvirt in Practice — Virtualization — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .cmd-log { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.82rem; background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius); padding: 14px; max-height: 320px; overflow-y: auto; }
+  .cmd-log .cmd-line { white-space: pre-wrap; word-break: break-word; padding: 4px 0; border-bottom: 1px dashed var(--code-border); }
+  .cmd-log .cmd-line:last-child { border-bottom: none; color: var(--text); font-weight: 600; }
+  .cmd-log .cmd-line:not(:last-child) { opacity: 0.55; }
+  .cmd-log .prompt { color: var(--accent-2); }
+  .step-text { min-height: 3.6em; }
+  .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
+  pre.xml-block { background: var(--code-bg); border: 1px solid var(--code-border); border-radius: var(--radius); padding: 14px; font-size: 0.8rem; overflow-x: auto; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 6 of 6</span>
+    <h1>QEMU &amp; libvirt in Practice</h1>
+    <p>Everything on the previous four pages shows up as a flag or a command here. This page walks through actually creating a disk, booting a VM with <span class="mono">qemu-system-x86_64</span>, giving it real network presence, and snapshotting it — then shows <span class="mono">libvirt</span>/<span class="mono">virsh</span> as the layer almost everyone actually uses to manage QEMU VMs declaratively instead of by hand, and finally <span class="mono">Terraform</span> as one more layer on top of that for managing a whole fleet of them as code.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">Building and booting a VM, step by step</h3>
+    <p style="margin-top: 0;">Step through the commands in order — each one is explained as you go:</p>
+    <div class="cmd-log" id="cmdLog"></div>
+    <div class="panel step-text" id="cmdStepText" style="margin-top: 10px;"></div>
+    <div class="controls">
+      <button class="btn" id="cmdResetBtn">⟲ Reset</button>
+      <button class="btn" id="cmdPrevBtn">◀ Prev</button>
+      <button class="btn btn-primary" id="cmdNextBtn">Next ▶</button>
+      <span class="step-counter" id="cmdStepCounter"></span>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Flag reference</h3>
+    <table>
+      <thead><tr><th>Flag</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">-enable-kvm</td><td>Use the KVM kernel module for hardware-accelerated CPU virtualization instead of software TCG emulation. See the <a href="cpu-virtualization.html">CPU Virtualization</a> page — omitting this silently falls back to TCG, 10-50x slower, with no error.</td></tr>
+        <tr><td class="mono">-m 4096</td><td>Guest RAM in MiB. This is the "assigned" number from the <a href="memory-virtualization.html">Memory Virtualization</a> overcommit calculator.</td></tr>
+        <tr><td class="mono">-smp 4</td><td>Number of virtual CPUs presented to the guest.</td></tr>
+        <tr><td class="mono">-cpu host</td><td>Expose the host CPU's exact feature set to the guest, for maximum performance — at the cost of migration portability, per the CPU page's gotchas.</td></tr>
+        <tr><td class="mono">-drive file=disk.qcow2,if=virtio</td><td>Attach the qcow2 image via the virtio-blk paravirtualized controller, from the <a href="storage.html">Storage</a> page.</td></tr>
+        <tr><td class="mono">-netdev / -device virtio-net-pci</td><td>Attach a paravirtualized NIC, from the <a href="device-io.html">Device &amp; I/O</a> page. <span class="mono">-netdev user</span> is NAT-only (no inbound); <span class="mono">-netdev tap</span> bridges the VM onto the real network.</td></tr>
+        <tr><td class="mono">-boot d</td><td>Boot from the CD-ROM device first — used only for the initial OS install.</td></tr>
+        <tr><td class="mono">-nographic / -vnc :0</td><td>How you actually see/reach the guest console: serial-over-terminal, or a VNC server QEMU exposes for a remote graphical console.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">libvirt: the same VM, managed declaratively</h3>
+    <p style="margin-top: 0;">Hand-typing <span class="mono">qemu-system-x86_64</span> flags every time doesn't scale past one or two VMs you manage yourself. <span class="mono">libvirt</span> is a management layer: a daemon (<span class="mono">libvirtd</span>) that takes a declarative XML "domain" definition and translates it into the equivalent QEMU invocation, tracks the running process, and exposes <span class="mono">virsh</span> as a CLI (and an API other tools like <span class="mono">virt-manager</span> and OpenStack build on). It's the same underlying QEMU/KVM doing the work — libvirt just stops you from having to remember every flag by hand.</p>
+    <pre class="xml-block">&lt;domain type='kvm'&gt;
+  &lt;name&gt;myvm&lt;/name&gt;
+  &lt;memory unit='MiB'&gt;4096&lt;/memory&gt;
+  &lt;vcpu&gt;4&lt;/vcpu&gt;
+  &lt;os&gt;&lt;type arch='x86_64'&gt;hvm&lt;/type&gt;&lt;/os&gt;
+  &lt;devices&gt;
+    &lt;disk type='file' device='disk'&gt;
+      &lt;driver name='qemu' type='qcow2'/&gt;
+      &lt;source file='/var/lib/libvirt/images/disk.qcow2'/&gt;
+      &lt;target dev='vda' bus='virtio'/&gt;
+    &lt;/disk&gt;
+    &lt;interface type='bridge'&gt;
+      &lt;source bridge='br0'/&gt;
+      &lt;model type='virtio'/&gt;
+    &lt;/interface&gt;
+  &lt;/devices&gt;
+&lt;/domain&gt;</pre>
+    <table style="margin-top: 14px;">
+      <thead><tr><th>virsh command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">virsh define vm.xml</td><td>Register the domain definition above — doesn't start it yet.</td></tr>
+        <tr><td class="mono">virsh start myvm</td><td>Boot it — libvirtd launches the actual qemu-system-x86_64 process on your behalf.</td></tr>
+        <tr><td class="mono">virsh list --all</td><td>Show every defined domain and its state (running, shut off, paused).</td></tr>
+        <tr><td class="mono">virsh console myvm</td><td>Attach to the guest's serial console from the terminal.</td></tr>
+        <tr><td class="mono">virsh snapshot-create-as myvm snap1</td><td>The libvirt equivalent of the qcow2 external-snapshot step above — managed declaratively instead of raw qemu-img calls.</td></tr>
+        <tr><td class="mono">virsh shutdown / destroy myvm</td><td>Graceful ACPI shutdown vs. immediate hard power-off (the VM equivalent of pulling the power cable).</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Terraform: the same VM, as code</h3>
+    <p style="margin-top: 0;">Terraform doesn't talk to QEMU directly — there's no such thing as a "QEMU provider." It goes through libvirt, exactly like <span class="mono">virsh</span> does: the community-maintained <span class="term" data-tip="dmacvicar/terraform-provider-libvirt -- not an official HashiCorp provider, but the de facto standard for managing KVM/QEMU VMs through libvirt with Terraform.">libvirt provider</span> connects to <span class="mono">libvirtd</span> over the same URI (<span class="mono">qemu:///system</span> locally, <span class="mono">qemu+ssh://user@host/system</span> for a remote hypervisor) and generates the same domain XML you saw above — it's a declarative client of libvirt, not a replacement for it.</p>
+    <p><span class="mono">terraform.tf</span> — provider setup:</p>
+    <pre class="xml-block">terraform {
+  required_providers {
+    libvirt = {
+      source  = "dmacvicar/libvirt"
+      version = "~> 0.7"
+    }
+  }
+}
+
+provider "libvirt" {
+  uri = "qemu:///system"
+}</pre>
+    <p><span class="mono">main.tf</span> — a base cloud image, a copy-on-write disk derived from it, cloud-init for first-boot config, and the domain itself:</p>
+    <pre class="xml-block">resource "libvirt_volume" "base" {
+  name   = "debian-12-generic.qcow2"
+  pool   = "default"
+  source = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+  format = "qcow2"
+}
+
+resource "libvirt_volume" "vm1_disk" {
+  name           = "vm1.qcow2"
+  pool           = "default"
+  base_volume_id = libvirt_volume.base.id   # same backing-file relationship as `qemu-img create -b`
+  size           = 21474836480              # bytes -- this is 20GiB, the provider does NOT take GB directly
+}
+
+resource "libvirt_cloudinit_disk" "vm1_init" {
+  name      = "vm1-cloudinit.iso"
+  user_data = <<-EOT
+    #cloud-config
+    hostname: vm1
+    users:
+      - name: ops
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        ssh_authorized_keys:
+          - ${file("~/.ssh/id_ed25519.pub")}
+  EOT
+}
+
+resource "libvirt_domain" "vm1" {
+  name      = "vm1"
+  memory    = 4096
+  vcpu      = 4
+  cloudinit = libvirt_cloudinit_disk.vm1_init.id
+
+  disk {
+    volume_id = libvirt_volume.vm1_disk.id
+  }
+
+  network_interface {
+    bridge = "br0"   # same TAP/bridge setup as the Device & I/O page
+  }
+}
+
+output "vm1_ip" {
+  value = libvirt_domain.vm1.network_interface[0].addresses[0]
+}</pre>
+    <table style="margin-top: 14px;">
+      <thead><tr><th>Command</th><th>What it does</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">terraform init</td><td>Downloads the libvirt provider plugin and initializes the working directory. Run once per project (and after adding new providers).</td></tr>
+        <tr><td class="mono">terraform plan</td><td>Shows exactly what would be created/changed/destroyed by diffing this config against Terraform's state file — nothing touches libvirtd yet.</td></tr>
+        <tr><td class="mono">terraform apply</td><td>Actually creates the volumes and domain, in dependency order (base image, then the derived disk, then the domain) — under the hood this is the same libvirt API calls <span class="mono">virsh define</span> and <span class="mono">virsh start</span> make.</td></tr>
+        <tr><td class="mono">terraform destroy</td><td>Tears down everything this config created — the domain, its disks, the cloud-init ISO. Only removes what's tracked in state.</td></tr>
+        <tr><td class="mono">terraform import libvirt_domain.vm1 vm1</td><td>Adopts a VM you already created by hand (via <span class="mono">virsh</span> or raw <span class="mono">qemu-system-x86_64</span>) into Terraform's state, so future changes go through Terraform instead of conflicting with it.</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>/dev/kvm permission errors are the most common first-run failure.</strong> Access is normally restricted to a <span class="mono">kvm</span> group; your user needs to be a member (and re-login for the group change to apply) before <span class="mono">-enable-kvm</span> will work at all.</li>
+      <li style="margin-bottom: 6px;"><strong><span class="mono">-netdev user</span> is NAT-only and easy to mistake for real networking.</strong> It's the simplest way to get a VM online, but the VM isn't reachable from the rest of your network without explicit <span class="mono">hostfwd</span> port forwards — for a VM other machines need to reach directly, TAP + bridge (from the <a href="device-io.html">Device &amp; I/O</a> page) is what's actually needed.</li>
+      <li style="margin-bottom: 6px;"><strong>Mixing hand-run QEMU and libvirt-managed VMs causes confusion.</strong> A VM started directly with <span class="mono">qemu-system-x86_64</span> is invisible to <span class="mono">virsh list</span> — libvirt only knows about domains it started itself. Pick one management approach per VM.</li>
+      <li style="margin-bottom: 6px;"><strong>An external snapshot's overlay file is exactly the fragile backing-chain setup from the Storage page.</strong> Don't move or delete <span class="mono">disk.qcow2</span> while <span class="mono">overlay.qcow2</span> is in use — the overlay only stores the delta and depends on the base being right where it left it.</li>
+      <li style="margin-bottom: 6px;"><strong>Hand-editing a Terraform-managed VM is the same split-brain problem, one layer up.</strong> Running <span class="mono">virsh edit</span> or <span class="mono">virsh destroy</span> on a domain Terraform created causes state drift — Terraform's state file still thinks the old config is what's running, and the next <span class="mono">terraform apply</span> either fights the manual change or tries to recreate the resource from scratch. Adopt existing domains with <span class="mono">terraform import</span> instead of mixing management approaches.</li>
+      <li><strong>The libvirt provider's <span class="mono">size</span> is in bytes, not GB.</strong> A config meant to create a 20GiB disk that instead sets <span class="mono">size = 20</span> silently creates a 20-<em>byte</em> volume — the provider won't warn you, and the resulting VM will fail to boot with a confusing "no bootable device" error that has nothing obviously to do with the real cause.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="storage.html">← Previous: Storage: Disk Images &amp; Snapshots</a>
+    <span></span>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  var steps = [
+    { cmd: "$ qemu-img create -f qcow2 disk.qcow2 20G", text: "Create a 20GB qcow2 image (see the Storage page). It's thin-provisioned — this file is currently only a few KB on disk, not 20GB, and grows as the guest actually writes data." },
+    { cmd: "$ qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 -cpu host \\\n    -drive file=disk.qcow2,if=virtio \\\n    -cdrom install.iso -boot d \\\n    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \\\n    -vnc :0", text: "First boot, installing the guest OS from an ISO. -enable-kvm turns on hardware acceleration (CPU Virtualization page); the disk and NIC are both virtio (Device & I/O page); -netdev user gives quick NAT-only internet access, good enough for downloading updates during install; -vnc exposes a graphical console since there's no OS installed yet to give us anything else." },
+    { cmd: "# after install completes, reboot without the installer:\n$ qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 -cpu host \\\n    -drive file=disk.qcow2,if=virtio \\\n    -netdev user,id=net0 -device virtio-net-pci,netdev=net0 \\\n    -vnc :0", text: "Same command, minus -cdrom and -boot d — now it boots straight from the installed disk. Still on NAT-only networking at this point." },
+    { cmd: "# host: create and bridge a TAP device (one-time setup)\n$ ip tuntap add dev tap0 mode tap\n$ ip link set tap0 master br0\n$ ip link set tap0 up", text: "To give the VM a real presence on the network — reachable from other machines, not just outbound NAT — wire up a TAP device and attach it to an existing bridge, exactly the setup walked through step-by-step on the Device & I/O page." },
+    { cmd: "$ qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 -cpu host \\\n    -drive file=disk.qcow2,if=virtio \\\n    -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \\\n    -device virtio-net-pci,netdev=net0 \\\n    -vnc :0", text: "Same VM, now attached via the TAP device instead of user-mode NAT — the guest's virtio-net interface is bridged straight onto the host's network." },
+    { cmd: "$ qemu-img create -f qcow2 -b disk.qcow2 -F qcow2 overlay.qcow2", text: "Before a risky change (an OS upgrade, say), create an external snapshot: a new, empty qcow2 file with disk.qcow2 as its backing file. This is the exact backing-file relationship from the Storage page's read-resolution demo." },
+    { cmd: "$ qemu-system-x86_64 -enable-kvm -m 4096 -smp 4 -cpu host \\\n    -drive file=overlay.qcow2,if=virtio \\\n    -netdev tap,id=net0,ifname=tap0,script=no,downscript=no \\\n    -device virtio-net-pci,netdev=net0", text: "Boot from overlay.qcow2 instead of disk.qcow2 directly. Every write now lands in the overlay; disk.qcow2 stays untouched underneath it." },
+    { cmd: "# if the change went badly: just discard the overlay\n$ rm overlay.qcow2\n# if it went well: fold the overlay's changes back into the base\n$ qemu-img commit overlay.qcow2", text: "Reverting is instant and free — delete the overlay, the base was never touched. Keeping the change means committing the overlay's deltas back down into disk.qcow2, after which the overlay file is no longer needed." }
+  ];
+
+  var cmdLog = document.getElementById("cmdLog");
+  var cmdStepText = document.getElementById("cmdStepText");
+  var cmdStepCounter = document.getElementById("cmdStepCounter");
+  var cmdPrevBtn = document.getElementById("cmdPrevBtn");
+  var cmdNextBtn = document.getElementById("cmdNextBtn");
+  var cmdResetBtn = document.getElementById("cmdResetBtn");
+  var cmdStepIndex = 0;
+
+  function renderCmd() {
+    cmdLog.innerHTML = "";
+    for (var i = 0; i <= cmdStepIndex; i++) {
+      var line = document.createElement("div");
+      line.className = "cmd-line";
+      line.textContent = steps[i].cmd;
+      cmdLog.appendChild(line);
+    }
+    cmdLog.scrollTop = cmdLog.scrollHeight;
+    cmdStepText.textContent = steps[cmdStepIndex].text;
+    cmdStepCounter.textContent = "Step " + (cmdStepIndex + 1) + " / " + steps.length;
+    cmdPrevBtn.disabled = cmdStepIndex === 0;
+    cmdNextBtn.disabled = cmdStepIndex === steps.length - 1;
+  }
+
+  cmdPrevBtn.addEventListener("click", function () { if (cmdStepIndex > 0) { cmdStepIndex--; renderCmd(); } });
+  cmdNextBtn.addEventListener("click", function () { if (cmdStepIndex < steps.length - 1) { cmdStepIndex++; renderCmd(); } });
+  cmdResetBtn.addEventListener("click", function () { cmdStepIndex = 0; renderCmd(); });
+  renderCmd();
+})();
+</script>
+</body>
+</html>

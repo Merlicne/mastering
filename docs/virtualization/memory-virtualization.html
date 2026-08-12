@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Memory Virtualization — Virtualization — Mastering</title>
+<link rel="stylesheet" href="../css/style.css">
+<style>
+  .component-explorer { display: grid; grid-template-columns: 220px 1fr; gap: 20px; }
+  @media (max-width: 640px) { .component-explorer { grid-template-columns: 1fr; } }
+  .component-list { display: flex; flex-direction: column; gap: 6px; }
+  .component-btn {
+    display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.9rem;
+  }
+  .component-btn:hover { border-color: var(--accent); }
+  .component-btn.selected { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+
+  .translation-chain { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 16px 0; font-size: 0.85rem; }
+  .translation-chain .step { padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-elevated); font-family: "SFMono-Regular", Consolas, monospace; }
+  .translation-chain .arrow { color: var(--text-muted); }
+  .translation-chain .via { font-size: 0.72rem; color: var(--accent-2); text-align: center; width: 100%; margin: -4px 0 -8px; }
+
+  .vm-table-wrap { overflow-x: auto; }
+  tr.vm-row.over { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+  .add-vm-form { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin: 16px 0; }
+  .add-vm-form .field { display: flex; flex-direction: column; gap: 6px; }
+  .add-vm-form .field label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+  .add-vm-form input { width: 120px; }
+  .vm-controls button {
+    width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--bg-elevated); color: var(--text); cursor: pointer; font-size: 0.8rem; line-height: 1;
+  }
+  .vm-controls button:hover { border-color: var(--accent); }
+
+  .meter-row { display: flex; align-items: center; gap: 10px; margin: 6px 0; font-size: 0.85rem; }
+  .meter-label { width: 150px; flex: 0 0 auto; color: var(--text-muted); }
+  .meter-track { flex: 1; height: 14px; border-radius: 7px; background: var(--code-bg); border: 1px solid var(--code-border); overflow: hidden; position: relative; }
+  .meter-fill { height: 100%; background: var(--accent); }
+  .meter-fill.danger { background: var(--danger); }
+  .meter-value { width: 90px; flex: 0 0 auto; text-align: right; font-family: "SFMono-Regular", Consolas, monospace; }
+</style>
+</head>
+<body>
+<div id="site-nav"></div>
+
+<div class="container">
+  <div class="page-header">
+    <span class="eyebrow">Topic 3 of 6</span>
+    <h1>Memory Virtualization</h1>
+    <p>Memory has the same problem CPU virtualization solved: a guest needs to believe it owns a flat, private address space, while actually sharing physical RAM with the host and every other guest. This page covers how that extra layer of translation works, and the tricks hypervisors use to overcommit memory safely.</p>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top: 0;">The double translation problem</h3>
+    <p style="margin-top: 0;">On bare metal, the CPU's MMU does one translation: guest virtual address → physical address, using page tables the OS controls directly. Under virtualization, the guest OS still maintains page tables — but they only translate to <strong>guest physical</strong> addresses, which aren't real physical memory at all. A second translation, guest physical → <strong>host physical</strong>, is needed to find where that memory actually lives, and the guest has no idea this second step exists.</p>
+    <div class="translation-chain">
+      <div class="step">Guest virtual addr</div>
+      <span class="arrow">→</span>
+      <div class="step">Guest physical addr</div>
+      <div class="via">via the guest's own page tables (guest-controlled)</div>
+      <span class="arrow">→</span>
+      <div class="step">Host physical addr</div>
+    </div>
+    <p style="margin-bottom: 0;">That second hop is exactly where the same hardware-vs-software split from <a href="cpu-virtualization.html">CPU Virtualization</a> shows up again.</p>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Shadow page tables vs. EPT/NPT</h3>
+    <p style="margin-top: 0;">This is memory virtualization's version of binary translation vs. hardware-assisted CPU virtualization — same shape, same historical order:</p>
+    <div class="component-explorer">
+      <div class="component-list" id="memList"></div>
+      <div class="component-detail-panel" id="memDetail"></div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Memory overcommit: the calculator</h3>
+    <p style="margin-top: 0;">Because guests rarely touch every page they're assigned, hosts routinely hand out more memory in total than they physically have — <strong>overcommit</strong>. It's safe exactly as long as actual usage stays under the host's real RAM. Add a few VMs below and watch what happens when assigned memory outpaces physical RAM, and separately when actual usage does too:</p>
+
+    <div class="controls">
+      <div class="field" style="display:flex;flex-direction:column;gap:6px;">
+        <label for="hostRam" style="font-size:0.72rem;text-transform:uppercase;letter-spacing:0.04em;color:var(--text-muted);">Host physical RAM (GB)</label>
+        <input type="number" id="hostRam" value="64" style="width:120px;">
+      </div>
+    </div>
+
+    <div class="vm-table-wrap">
+      <table>
+        <thead><tr><th>VM</th><th>Assigned (GB)</th><th>Actually used (GB)</th><th></th></tr></thead>
+        <tbody id="vmBody"></tbody>
+      </table>
+    </div>
+
+    <div class="add-vm-form">
+      <div class="field"><label for="vmName">Name</label><input type="text" id="vmName" placeholder="vm-4"></div>
+      <div class="field"><label for="vmAssigned">Assigned GB</label><input type="number" id="vmAssigned" value="16"></div>
+      <div class="field"><label for="vmUsed">Actually used GB</label><input type="number" id="vmUsed" value="6"></div>
+      <button class="btn btn-primary" id="addVmBtn">+ Add VM</button>
+    </div>
+
+    <div class="meter-row">
+      <span class="meter-label">Total assigned</span>
+      <div class="meter-track"><div class="meter-fill" id="assignedFill"></div></div>
+      <span class="meter-value" id="assignedValue"></span>
+    </div>
+    <div class="meter-row">
+      <span class="meter-label">Total actually used</span>
+      <div class="meter-track"><div class="meter-fill" id="usedFill"></div></div>
+      <span class="meter-value" id="usedValue"></span>
+    </div>
+    <div class="panel" id="overcommitVerdict" style="margin-top: 12px;"></div>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Reclaiming memory without violating isolation: ballooning and KSM</h3>
+    <table>
+      <thead><tr><th>Technique</th><th>How it works</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Ballooning</strong></td>
+          <td>A special <span class="term" data-tip="A kernel driver installed inside the guest specifically to cooperate with the hypervisor on memory reclaim -- it has no purpose other than this.">balloon driver</span> runs inside the guest. To reclaim host memory, the hypervisor asks the balloon to "inflate" — the driver allocates pages inside the guest (making the guest OS think it's under memory pressure and free up or swap out its own least-needed pages), then hands those physical pages back to the host. "Deflating" the balloon later returns memory to the guest. It works entirely through the guest's own memory management, which is why it needs a cooperating, balloon-driver-aware guest.</td>
+        </tr>
+        <tr>
+          <td><strong>KSM (Kernel Samepage Merging)</strong></td>
+          <td>The host kernel periodically scans memory pages across <em>all</em> VMs, and where it finds byte-identical pages — extremely common across VMs running the same OS, since large stretches of kernel code, zeroed pages, and common libraries are literally the same bytes — it merges them into a single copy-on-write page. Any VM that later writes to it gets its own private copy transparently. Free, but not without cost: see gotchas below.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top: 20px;">
+    <h3 style="margin-top: 0;">Common gotchas</h3>
+    <ul style="margin: 0; padding-left: 20px;">
+      <li style="margin-bottom: 6px;"><strong>The double-paging problem.</strong> If the host swaps out a guest's page under memory pressure, and the guest OS independently decides to swap that same page out too, you get redundant, wasteful I/O — the host paging a page the guest itself was about to discard. This is a real argument for preferring ballooning (which works with the guest's cooperation) over blind host-level swapping.</li>
+      <li style="margin-bottom: 6px;"><strong>Ballooning can trigger guest OOM if inflated too aggressively.</strong> The guest genuinely believes memory has become scarce; if the balloon claims more than the guest can comfortably free, the guest's own out-of-memory killer can start terminating processes exactly as it would on real hardware.</li>
+      <li style="margin-bottom: 6px;"><strong>KSM has a known side-channel risk.</strong> Because merging creates real timing differences (writing to a merged page is measurably slower than to a private one, since it triggers copy-on-write), it's been used as a cross-VM information side channel in research attacks. Sensitive multi-tenant environments sometimes disable KSM specifically to close this off.</li>
+      <li><strong>EPT/NPT isn't free just because it's hardware.</strong> A TLB miss on virtualized memory needs a full 2-D page walk (guest page table levels × host page table levels — up to 24 memory accesses on x86-64 in the worst case). This is exactly why hypervisors push hard for guests to use huge pages: fewer, bigger pages mean far fewer TLB misses to begin with.</li>
+    </ul>
+  </div>
+
+  <div class="page-footer-nav">
+    <a href="cpu-virtualization.html">← Previous: CPU Virtualization</a>
+    <a href="device-io.html">Next: Device &amp; I/O Virtualization →</a>
+  </div>
+</div>
+
+<script src="../content.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/tooltip.js"></script>
+<script>
+(function () {
+  // ---------------- Shadow page tables vs EPT/NPT explorer ----------------
+  var memApproaches = [
+    { name: "Shadow page tables (software)", desc: "The hypervisor maintains its own hidden 'shadow' page table per guest process, holding the fully-resolved guest-virtual → host-physical mapping, and points the real hardware MMU at the shadow instead of the guest's own table. Every time the guest modifies its page tables, the hypervisor must trap that write and update the shadow to match — which means write-protecting the guest's page tables and intercepting every single update. Correct, but chatty and slow under workloads that modify page tables frequently." },
+    { name: "EPT / NPT (hardware-assisted)", desc: "Intel's Extended Page Tables and AMD's Nested Page Tables let the guest's own page tables be used directly and unmodified — the guest translates virtual → guest-physical exactly as it would on bare metal, and the hardware MMU automatically walks a second, hypervisor-controlled table for guest-physical → host-physical, on every memory access. No trapping guest page table writes at all. This is 'the memory analog of VT-x/AMD-V': moving a translation step from software interception into the hardware page-walk itself." }
+  ];
+
+  var memList = document.getElementById("memList");
+  var memDetail = document.getElementById("memDetail");
+
+  function renderMemDetail(m) {
+    memDetail.innerHTML = "<h4 style=\"margin-top:0;\">" + m.name + "</h4><p>" + m.desc + "</p>";
+  }
+  memApproaches.forEach(function (m, idx) {
+    var btn = document.createElement("button");
+    btn.className = "component-btn" + (idx === 0 ? " selected" : "");
+    btn.textContent = m.name;
+    btn.addEventListener("click", function () {
+      Array.prototype.forEach.call(memList.children, function (el) { el.classList.remove("selected"); });
+      btn.classList.add("selected");
+      renderMemDetail(m);
+    });
+    memList.appendChild(btn);
+  });
+  renderMemDetail(memApproaches[0]);
+
+  // ---------------- Overcommit calculator ----------------
+  var vms = [
+    { name: "vm-1", assigned: 16, used: 4 },
+    { name: "vm-2", assigned: 16, used: 5 },
+    { name: "vm-3", assigned: 16, used: 3 }
+  ];
+
+  var hostRamInput = document.getElementById("hostRam");
+  var vmBody = document.getElementById("vmBody");
+  var vmName = document.getElementById("vmName");
+  var vmAssigned = document.getElementById("vmAssigned");
+  var vmUsed = document.getElementById("vmUsed");
+  var addVmBtn = document.getElementById("addVmBtn");
+  var assignedFill = document.getElementById("assignedFill");
+  var assignedValue = document.getElementById("assignedValue");
+  var usedFill = document.getElementById("usedFill");
+  var usedValue = document.getElementById("usedValue");
+  var overcommitVerdict = document.getElementById("overcommitVerdict");
+
+  function renderVms() {
+    vmBody.innerHTML = "";
+    vms.forEach(function (vm, i) {
+      var tr = document.createElement("tr");
+      tr.className = "vm-row";
+      tr.innerHTML =
+        "<td>" + vm.name + "</td>" +
+        "<td class=\"mono\">" + vm.assigned + "</td>" +
+        "<td class=\"mono\">" + vm.used + "</td>" +
+        "<td><div class=\"vm-controls\"><button data-i=\"" + i + "\">✕</button></div></td>";
+      vmBody.appendChild(tr);
+    });
+  }
+
+  vmBody.addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    vms.splice(parseInt(btn.dataset.i, 10), 1);
+    recompute();
+  });
+
+  addVmBtn.addEventListener("click", function () {
+    var name = vmName.value.trim() || "vm-" + (vms.length + 1);
+    var assigned = parseFloat(vmAssigned.value) || 0;
+    var used = parseFloat(vmUsed.value) || 0;
+    vms.push({ name: name, assigned: assigned, used: used });
+    vmName.value = "";
+    recompute();
+  });
+
+  function recompute() {
+    var hostRam = parseFloat(hostRamInput.value) || 0;
+    var totalAssigned = vms.reduce(function (s, v) { return s + v.assigned; }, 0);
+    var totalUsed = vms.reduce(function (s, v) { return s + v.used; }, 0);
+
+    var assignedPct = hostRam > 0 ? Math.min(100, (totalAssigned / hostRam) * 100) : 0;
+    var usedPct = hostRam > 0 ? Math.min(100, (totalUsed / hostRam) * 100) : 0;
+
+    assignedFill.style.width = assignedPct + "%";
+    assignedFill.className = "meter-fill" + (totalAssigned > hostRam ? " danger" : "");
+    assignedValue.textContent = totalAssigned + " / " + hostRam + " GB";
+
+    usedFill.style.width = usedPct + "%";
+    usedFill.className = "meter-fill" + (totalUsed > hostRam ? " danger" : "");
+    usedValue.textContent = totalUsed + " / " + hostRam + " GB";
+
+    var ratio = hostRam > 0 ? (totalAssigned / hostRam).toFixed(2) : "—";
+    var verdictHtml;
+    if (totalUsed > hostRam) {
+      verdictHtml = "<strong style=\"color: var(--danger);\">Actual usage exceeds physical RAM.</strong> Overcommit ratio " + ratio + "x. This is the dangerous case — ballooning and KSM can only reclaim so much; the host will start swapping or invoking its own OOM killer.";
+    } else if (totalAssigned > hostRam) {
+      verdictHtml = "<strong style=\"color: var(--warn);\">Overcommitted but currently safe.</strong> Overcommit ratio " + ratio + "x — assigned memory exceeds physical RAM, but actual usage doesn't yet. This is the normal, intended state; it only becomes a problem if usage rises to match what's assigned.";
+    } else {
+      verdictHtml = "<strong style=\"color: var(--ok);\">No overcommit.</strong> Assigned memory (" + totalAssigned + " GB) fits within physical RAM (" + hostRam + " GB) with room to spare.";
+    }
+    overcommitVerdict.innerHTML = verdictHtml;
+
+    renderVms();
+  }
+
+  hostRamInput.addEventListener("input", recompute);
+  recompute();
+})();
+</script>
+</body>
+</html>
