@@ -32,7 +32,7 @@
   }
   .prefix-row input[type="range"] { flex: 1; }
   .prefix-value {
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-weight: 700;
     min-width: 44px;
     text-align: center;
@@ -65,10 +65,10 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.7rem;
-    border-radius: 3px;
-    color: #fff;
+    border-radius: var(--radius-sm);
+    color: var(--accent-ink);
   }
   .bit.net { background: var(--accent); }
   .bit.host { background: var(--accent-2); }
@@ -103,7 +103,7 @@
     margin-bottom: 4px;
   }
   .result-item .value {
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 1.02rem;
   }
   .result-item .value.small { font-size: 0.85rem; }

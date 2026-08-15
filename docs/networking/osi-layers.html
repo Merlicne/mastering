@@ -39,7 +39,7 @@
     border-color: var(--accent);
   }
   .layer-btn .num {
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-weight: 700;
     opacity: 0.7;
     font-size: 0.8rem;
@@ -118,17 +118,17 @@
     flex-wrap: wrap;
   }
   .chip {
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.78rem;
     font-weight: 700;
     padding: 10px 12px;
-    color: #fff;
+    color: var(--accent-ink);
   }
-  .chip.eth { background: #7c3aed; }
-  .chip.ip { background: #d97706; }
-  .chip.tcp { background: #0d9488; }
-  .chip.data { background: #2563eb; padding: 10px 22px; }
-  .chip.fcs { background: #7c3aed; }
+  .chip.eth { background: var(--swatch-violet); }
+  .chip.ip { background: var(--swatch-amber); }
+  .chip.tcp { background: var(--accent); }
+  .chip.data { background: var(--swatch-indigo); padding: 10px 22px; }
+  .chip.fcs { background: var(--swatch-violet); }
 
   .wire-label {
     text-align: center;

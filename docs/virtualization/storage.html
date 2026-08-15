@@ -24,12 +24,12 @@
   .block-grid { display: flex; flex-wrap: wrap; gap: 6px; }
   .block-btn {
     width: 34px; height: 34px; border-radius: 6px; border: 1px solid var(--border); background: var(--code-bg);
-    font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; cursor: pointer; color: var(--text);
+    font-family: var(--font-mono); font-size: 0.8rem; cursor: pointer; color: var(--text);
   }
   .block-btn.owned { background: color-mix(in srgb, var(--accent) 30%, transparent); border-color: var(--accent); font-weight: 700; }
   .block-btn.queried { outline: 2px solid var(--accent-2); outline-offset: 1px; }
   .resolve-trace { margin-top: 4px; }
-  .resolve-line { padding: 3px 0; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.85rem; }
+  .resolve-line { padding: 3px 0; font-family: var(--font-mono); font-size: 0.85rem; }
   .resolve-line .miss { color: var(--text-muted); }
   .resolve-line .hit { color: var(--ok); font-weight: 700; }
 </style>

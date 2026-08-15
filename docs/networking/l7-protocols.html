@@ -15,9 +15,9 @@
   .proto-tab.active { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
   .proto-loss-toggle { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 0.88rem; }
 
-  .timeline-setup { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; font-family: "SFMono-Regular", Consolas, monospace; }
+  .timeline-setup { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; font-family: var(--font-mono); }
   .timeline-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-  .timeline-label { flex: 0 0 110px; font-size: 0.78rem; font-family: "SFMono-Regular", Consolas, monospace; color: var(--text-muted); }
+  .timeline-label { flex: 0 0 110px; font-size: 0.78rem; font-family: var(--font-mono); color: var(--text-muted); }
   .timeline-track { flex: 1; height: 20px; background: var(--code-bg); border-radius: 4px; position: relative; overflow: hidden; }
   .timeline-seg { position: absolute; top: 0; height: 100%; border-radius: 4px; }
   .timeline-seg.setup { background: var(--text-muted); opacity: 0.5; }
@@ -30,7 +30,7 @@
 
   /* Request/response anatomy */
   .http-block {
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.85rem;
     background: var(--code-bg);
     border: 1px solid var(--code-border);
@@ -41,14 +41,14 @@
   }
 
   /* Status codes */
-  .status-row td:first-child { font-family: "SFMono-Regular", Consolas, monospace; font-weight: 700; }
+  .status-row td:first-child { font-family: var(--font-mono); font-weight: 700; }
 
   /* WebSocket demo */
   .ws-log { margin-top: 12px; }
   .ws-msg { display: flex; margin-bottom: 6px; }
   .ws-msg.client { justify-content: flex-start; }
   .ws-msg.server { justify-content: flex-end; }
-  .ws-bubble { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 0.85rem; font-family: "SFMono-Regular", Consolas, monospace; }
+  .ws-bubble { max-width: 70%; padding: 8px 12px; border-radius: 10px; font-size: 0.85rem; font-family: var(--font-mono); }
   .ws-msg.client .ws-bubble { background: var(--accent); color: var(--accent-ink); border-bottom-left-radius: 2px; }
   .ws-msg.server .ws-bubble { background: var(--code-bg); border: 1px solid var(--code-border); border-bottom-right-radius: 2px; }
 
@@ -56,7 +56,7 @@
   .grpc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 14px; }
   .grpc-card { border: 1px solid var(--border); border-radius: 8px; padding: 14px; background: var(--bg-elevated); }
   .grpc-card h4 { margin: 0 0 8px; font-size: 0.95rem; }
-  .grpc-diagram { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; color: var(--text-muted); line-height: 1.8; }
+  .grpc-diagram { font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); line-height: 1.8; }
 
   .step-counter { color: var(--text-muted); font-size: 0.85rem; margin-left: auto; }
 </style>

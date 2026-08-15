@@ -1,20 +1,108 @@
+/* ============================================================
+   Mastering — shared design system
+   Direction: "engineering field notebook." The subject is
+   schematics (packet flow, wire protocols, cluster topology), so
+   the system leans on drafting conventions — ruled grid, spec-sheet
+   labels, a trace/signal accent pair — instead of a generic
+   SaaS-docs look. Every page on the site inherits from here.
+   ============================================================ */
+
+/* ---------- Self-hosted type ---------- */
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  src: url("../fonts/plex-sans-cond-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Sans Condensed";
+  src: url("../fonts/plex-sans-cond-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Literata";
+  src: url("../fonts/literata-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Literata";
+  src: url("../fonts/literata-400i.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Literata";
+  src: url("../fonts/literata-600.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("../fonts/plex-mono-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("../fonts/plex-mono-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* ---------- Design tokens ---------- */
 :root {
-  --bg: #f7f8fa;
-  --bg-elevated: #ffffff;
-  --text: #1a1d23;
-  --text-muted: #5b6472;
-  --border: #e2e5ea;
-  --accent: #2563eb;
+  /* Ink / paper */
+  --ink: #14181f;
+  --text: var(--ink);
+  --text-muted: #5c6a68;
+  --paper: #f2f5f4;
+  --bg: var(--paper);
+  --bg-elevated: #fdfefe;
+  --border: #d7dfdd;
+  --grid-line: rgba(20, 24, 31, 0.045);
+
+  /* Trace (primary) / Signal (secondary) — two genuinely distinct
+     accents already in use across the site: primary nav/links vs.
+     "also relevant" cross-references. */
+  --accent: #0a7c73;
   --accent-ink: #ffffff;
-  --accent-2: #0d9488;
-  --code-bg: #eef1f6;
-  --code-border: #d7dce4;
-  --shadow: 0 1px 2px rgba(20, 24, 32, 0.06), 0 8px 24px rgba(20, 24, 32, 0.06);
-  --radius: 10px;
-  --danger: #dc2626;
-  --warn: #b45309;
-  --ok: #15803d;
+  --accent-2: #a55324;
+
+  /* Status — its own lane, not counted as the accent. Chosen to
+     match real protocol convention (SYN=go, FIN/RST=stop) that the
+     interactive pages already lean on. */
+  --ok: #146c43;
+  --warn: #9a5b12;
+  --danger: #b3261e;
+
+  --code-bg: #e9eeec;
+  --code-border: #d1dad8;
+
+  /* Categorical swatches — for diagrams distinguishing several
+     protocol layers/algorithms at once (OSI chip stack, TLS cipher
+     suite anatomy), where two accents aren't enough. Two slots reuse
+     --accent/--danger so the categorical set still reads as part of
+     the same system rather than a bolted-on rainbow. */
+  --swatch-violet: #6d28d9;
+  --swatch-amber: #b45309;
+  --swatch-indigo: #2543a8;
+  --shadow: 0 1px 2px rgba(20, 24, 31, 0.05), 0 6px 20px rgba(20, 24, 31, 0.06);
+  --radius: 6px;
+  --radius-sm: 3px;
+
+  /* Type roles */
+  --font-display: "IBM Plex Sans Condensed", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-body: "Literata", Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
 /* ---------- Reset-ish base ---------- */
@@ -26,27 +114,49 @@ html, body {
 }
 
 body {
-  background: var(--bg);
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 28px 28px;
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  line-height: 1.5;
+  font-family: var(--font-body);
+  font-size: 1.05rem;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
 
-code, pre, .mono {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-}
+code, pre, .mono { font-family: var(--font-mono); }
 
 h1, h2, h3, h4 {
-  line-height: 1.25;
-  font-weight: 650;
+  font-family: var(--font-display);
+  line-height: 1.2;
+  font-weight: 700;
+  text-wrap: balance;
 }
+
+p { max-width: 68ch; }
 
 a {
   color: var(--accent);
   text-decoration: none;
 }
 a:hover { text-decoration: underline; }
+
+a:focus-visible, button:focus-visible, input:focus-visible, .term:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ---------- Layout ---------- */
 .container {
@@ -60,24 +170,33 @@ a:hover { text-decoration: underline; }
 }
 
 .page-header h1 {
-  font-size: 1.9rem;
+  font-size: 2.15rem;
+  letter-spacing: -0.01em;
   margin: 0 0 8px;
 }
 
 .page-header p {
   color: var(--text-muted);
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.1rem;
 }
 
 .eyebrow {
-  display: inline-block;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent-2);
   margin-bottom: 10px;
+}
+
+.eyebrow::before {
+  content: "§";
+  font-weight: 700;
 }
 
 /* ---------- Nav ---------- */
@@ -87,6 +206,7 @@ a:hover { text-decoration: underline; }
   z-index: 20;
   background: var(--bg-elevated);
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--grid-line);
 }
 
 .site-nav-inner {
@@ -100,7 +220,9 @@ a:hover { text-decoration: underline; }
 }
 
 .site-nav-brand {
+  font-family: var(--font-display);
   font-weight: 700;
+  letter-spacing: 0.02em;
   color: var(--text) !important;
   text-decoration: none !important;
   white-space: nowrap;
@@ -111,15 +233,18 @@ a:hover { text-decoration: underline; }
   align-items: center;
   gap: 4px;
   flex-wrap: wrap;
-  font-size: 0.9rem;
+  font-family: var(--font-display);
+  font-size: 0.92rem;
+  font-weight: 600;
 }
 
 .site-nav-group-label {
-  font-size: 0.68rem;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--text-muted);
-  font-weight: 700;
+  font-weight: 500;
   white-space: nowrap;
   margin-right: 2px;
 }
@@ -135,7 +260,7 @@ a:hover { text-decoration: underline; }
   color: var(--text-muted);
   text-decoration: none !important;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .site-nav-links a:hover {
@@ -162,7 +287,10 @@ a:hover { text-decoration: underline; }
 
 .card h3 {
   margin-top: 0;
+  font-size: 1.15rem;
 }
+
+.card li { max-width: 62ch; }
 
 .topic-grid {
   display: grid;
@@ -172,15 +300,27 @@ a:hover { text-decoration: underline; }
 }
 
 .topic-card {
+  position: relative;
   display: block;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 20px;
+  padding: 22px 20px 20px;
   box-shadow: var(--shadow);
   text-decoration: none !important;
   color: var(--text) !important;
   transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.topic-card::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 7px;
+  height: 7px;
+  border-left: 1.5px solid var(--border);
+  border-top: 1.5px solid var(--border);
 }
 
 .topic-card:hover {
@@ -188,13 +328,16 @@ a:hover { text-decoration: underline; }
   border-color: var(--accent);
 }
 
+.topic-card:hover::before { border-color: var(--accent); }
+
 .topic-card .icon {
-  font-size: 1.6rem;
+  font-size: 1.5rem;
   margin-bottom: 10px;
   display: block;
 }
 
 .topic-card h3 {
+  font-family: var(--font-display);
   margin: 0 0 6px;
   font-size: 1.1rem;
 }
@@ -203,6 +346,7 @@ a:hover { text-decoration: underline; }
   margin: 0;
   color: var(--text-muted);
   font-size: 0.92rem;
+  font-family: var(--font-body);
 }
 
 .topic-card.cross-tag {
@@ -214,14 +358,18 @@ a:hover { text-decoration: underline; }
   border-color: var(--accent-2);
 }
 
+.topic-card.cross-tag:hover::before { border-color: var(--accent-2); }
+
 .cross-tag-badge {
   display: inline-block;
-  font-size: 0.68rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-2) 16%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--accent-2) 14%, transparent);
   color: var(--accent-2);
   margin-bottom: 10px;
 }
@@ -232,6 +380,7 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--code-border);
   border-radius: var(--radius);
   padding: 16px;
+  font-family: var(--font-body);
 }
 
 .log {
@@ -239,8 +388,8 @@ a:hover { text-decoration: underline; }
   border: 1px solid var(--code-border);
   border-radius: var(--radius);
   padding: 12px 14px;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.85rem;
+  font-family: var(--font-mono);
+  font-size: 0.83rem;
   max-height: 260px;
   overflow-y: auto;
 }
@@ -258,9 +407,11 @@ a:hover { text-decoration: underline; }
   background: var(--bg-elevated);
   color: var(--text);
   padding: 9px 16px;
-  border-radius: 8px;
-  font-size: 0.9rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: 0.88rem;
   font-weight: 600;
+  letter-spacing: 0.01em;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -292,10 +443,10 @@ input[type="text"], input[type="number"] {
   background: var(--bg-elevated);
   border: 1px solid var(--border);
   color: var(--text);
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   padding: 9px 12px;
   font-size: 0.95rem;
-  font-family: inherit;
+  font-family: var(--font-mono);
 }
 
 input[type="range"] {
@@ -306,17 +457,18 @@ input[type="range"] {
 /* ---------- Badges ---------- */
 .badge {
   display: inline-block;
-  font-size: 0.72rem;
-  font-weight: 700;
-  padding: 2px 8px;
-  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 500;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
   background: var(--code-bg);
   border: 1px solid var(--code-border);
   color: var(--text-muted);
 }
 
 .badge-accent {
-  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
   color: var(--accent);
   border-color: transparent;
 }
@@ -330,6 +482,7 @@ table {
   width: 100%;
   border-collapse: collapse;
   font-size: 0.92rem;
+  font-family: var(--font-body);
 }
 
 th, td {
@@ -339,14 +492,15 @@ th, td {
 }
 
 th {
+  font-family: var(--font-mono);
   color: var(--text-muted);
-  font-weight: 600;
-  font-size: 0.8rem;
+  font-weight: 500;
+  font-size: 0.76rem;
   text-transform: uppercase;
-  letter-spacing: 0.03em;
+  letter-spacing: 0.04em;
 }
 
-td.mono, th.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; }
+td.mono, th.mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 /* ---------- Footer nav (prev/next) ---------- */
 .page-footer-nav {
@@ -356,7 +510,9 @@ td.mono, th.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", M
   margin-top: 40px;
   padding-top: 20px;
   border-top: 1px solid var(--border);
+  font-family: var(--font-display);
   font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .page-footer-nav a {
@@ -373,23 +529,18 @@ td.mono, th.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", M
   position: relative;
 }
 
-.term:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 2px;
-}
-
 .tooltip-popover {
   position: fixed;
   z-index: 100;
   max-width: 320px;
-  background: var(--text);
+  background: var(--ink);
   color: #ffffff;
   padding: 10px 12px;
-  border-radius: 8px;
-  font-size: 0.85rem;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-body);
+  font-size: 0.88rem;
   font-weight: 400;
-  line-height: 1.45;
+  line-height: 1.5;
   box-shadow: var(--shadow);
   opacity: 0;
   transform: translateY(4px);
@@ -406,7 +557,7 @@ td.mono, th.mono { font-family: "SFMono-Regular", Consolas, "Liberation Mono", M
   position: absolute;
   width: 10px;
   height: 10px;
-  background: var(--text);
+  background: var(--ink);
   transform: rotate(45deg);
 }
 

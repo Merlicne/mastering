@@ -17,12 +17,12 @@
     border-radius: 6px;
     border: 1px solid var(--border);
     background: var(--bg-elevated);
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.75rem;
     color: var(--text-muted);
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   }
-  .seg-box.acked { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .seg-box.acked { background: var(--ok); border-color: var(--ok); color: var(--accent-ink); }
   .seg-box.inflight { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 
   /* ---------------- Congestion window chart ---------------- */
@@ -41,7 +41,7 @@
     position: absolute;
     pointer-events: none;
     background: var(--text);
-    color: #fff;
+    color: var(--accent-ink);
     font-size: 0.78rem;
     padding: 6px 9px;
     border-radius: 6px;

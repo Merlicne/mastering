@@ -31,14 +31,14 @@
   }
   .hop-box.passed { border-color: var(--accent-2); }
   .hop-box.current { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .hop-box.current.discarded { background: var(--danger); border-color: var(--danger); color: #fff; }
-  .hop-box.current.reached { background: var(--ok); border-color: var(--ok); color: #fff; }
+  .hop-box.current.discarded { background: var(--danger); border-color: var(--danger); color: var(--accent-ink); }
+  .hop-box.current.reached { background: var(--ok); border-color: var(--ok); color: var(--accent-ink); }
   .hop-connector { flex: 1; height: 2px; background: var(--border); margin: 0 4px; transition: background 0.2s ease; }
   .hop-connector.traveled { background: var(--accent-2); }
-  .ttl-badge { text-align: center; font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
+  .ttl-badge { text-align: center; font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; }
   .return-note {
     text-align: center;
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.82rem;
     color: var(--danger);
     min-height: 1.4em;

@@ -17,7 +17,7 @@
     font-weight: 500;
     font-size: 0.75rem;
     color: var(--text-muted);
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     margin-top: 2px;
   }
 
@@ -32,7 +32,7 @@
   .seq-row { position: relative; }
   .seq-label {
     text-align: center;
-    font-family: "SFMono-Regular", Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 0.8rem;
     margin-bottom: 4px;
   }
@@ -40,13 +40,13 @@
     font-weight: 700;
     padding: 1px 7px;
     border-radius: 999px;
-    color: #fff;
+    color: var(--accent-ink);
     margin-right: 6px;
   }
-  .flagbadge.syn { background: #2563eb; }
-  .flagbadge.ack { background: #6b7280; }
-  .flagbadge.data { background: #0d9488; }
-  .flagbadge.fin { background: #dc2626; }
+  .flagbadge.syn { background: var(--swatch-indigo); }
+  .flagbadge.ack { background: var(--text-muted); }
+  .flagbadge.data { background: var(--accent); }
+  .flagbadge.fin { background: var(--danger); }
 
   .seq-arrow {
     position: relative;

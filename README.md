@@ -17,6 +17,7 @@ docs/                   GitHub Pages serves from here
 ├── index.html          Global hub — lists each subject
 ├── content.js          Single source of truth for every topic page (path, title, tags, ...)
 ├── css/style.css        Shared design system
+├── fonts/                Self-hosted webfonts used by css/style.css (no CDN)
 ├── js/nav.js             Shared nav bar, driven by content.js
 ├── js/tooltip.js         Shared glossary-tooltip engine (the .term/data-tip spans)
 ├── networking/           Networking subject: its own index.html + topic pages
